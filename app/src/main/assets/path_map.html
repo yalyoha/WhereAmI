@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WhereAmI path</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0f1115; color: #e8eaf0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  #note { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px;
+    background: rgba(26,29,36,0.92); border: 1px solid #2a2e38; border-radius: 10px;
+    font-size: 13px; color: #8a90a0; display: none; }
+  #note.visible { display: block; }
+</style>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=4df5159a-09a1-449c-ba51-e79660028321&lang=ru_RU"></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="note"></div>
+
+<script>
+(function () {
+  let map = null;
+  let polyline = null;
+  let startMarker = null;
+  let endMarker = null;
+  let ready = false;
+  let pendingJson = null;
+
+  ymaps.ready(function () {
+    map = new ymaps.Map('map', {
+      center: [55.751244, 37.618423],
+      zoom: 10,
+      controls: ['zoomControl', 'typeSelector']
+    });
+    ready = true;
+    if (pendingJson !== null) {
+      const j = pendingJson;
+      pendingJson = null;
+      window.onTrackUpdated(j);
+    }
+  });
+
+  function setNote(text) {
+    const n = document.getElementById('note');
+    if (!text) { n.classList.remove('visible'); return; }
+    n.textContent = text;
+    n.classList.add('visible');
+  }
+
+  function clearGeo() {
+    if (polyline) { map.geoObjects.remove(polyline); polyline = null; }
+    if (startMarker) { map.geoObjects.remove(startMarker); startMarker = null; }
+    if (endMarker) { map.geoObjects.remove(endMarker); endMarker = null; }
+  }
+
+  // Вызывается из Kotlin: { color, label, points:[[lat,lon,ts], ...] }
+  window.onTrackUpdated = function (jsonString) {
+    if (!ready) { pendingJson = jsonString; return; }
+    let data;
+    try { data = JSON.parse(jsonString); } catch (e) { setNote('parse error'); return; }
+    clearGeo();
+    const pts = data.points || [];
+    if (pts.length === 0) {
+      setNote('Точек за период не найдено');
+      return;
+    }
+    setNote(null);
+
+    const coords = pts.map(p => [p[0], p[1]]);
+    polyline = new ymaps.Polyline(coords, {
+      hintContent: data.label || ''
+    }, {
+      strokeColor: data.color || '#4a90ff',
+      strokeWidth: 5,
+      strokeOpacity: 0.85
+    });
+    map.geoObjects.add(polyline);
+
+    // start (зелёный) — самая старая точка, end (красный) — самая свежая
+    // sortировка приходит DESC по recorded_at от сервера: [0] свежая, [last] старая
+    const start = coords[coords.length - 1];
+    const end = coords[0];
+    startMarker = new ymaps.Placemark(start, { iconCaption: 'старт' },
+      { preset: 'islands#greenCircleDotIcon' });
+    endMarker = new ymaps.Placemark(end, { iconCaption: 'финиш' },
+      { preset: 'islands#redCircleDotIcon' });
+    map.geoObjects.add(startMarker);
+    map.geoObjects.add(endMarker);
+
+    // подогнать карту под весь маршрут
+    try {
+      const bounds = polyline.geometry.getBounds();
+      if (bounds) map.setBounds(bounds, { checkZoomRange: true, zoomMargin: 40, duration: 300 });
+    } catch (e) {}
+  };
+})();
+</script>
+</body>
+</html>

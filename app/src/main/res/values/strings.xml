@@ -1,0 +1,75 @@
+<resources>
+    <string name="app_name">WhereAmI</string>
+
+    <!-- Inputs -->
+    <string name="hint_token">Bearer token (hex 32)</string>
+    <string name="hint_my_slug">Мой логин (slug)</string>
+
+    <!-- Buttons -->
+    <string name="btn_save">Сохранить</string>
+    <string name="btn_test">Тест отправки</string>
+    <string name="btn_logout">Выйти</string>
+    <string name="open_settings">Открыть настройки</string>
+    <string name="grant">Разрешить</string>
+
+    <!-- Validation toasts -->
+    <string name="toast_token_format">Токен должен быть hex 32 символа</string>
+    <string name="toast_my_slug_empty">Укажи свой логин</string>
+    <string name="toast_saved">Сохранено · передача включена</string>
+    <string name="toast_signed_out">Вышли · передача остановлена</string>
+    <string name="toast_test_connected">Подключен</string>
+    <string name="toast_test_failed">Ошибка подключения</string>
+
+    <!-- Notification -->
+    <string name="notif_channel_name">Передача координат</string>
+    <string name="notif_channel_auth">WhereAmI: предупреждения</string>
+    <string name="notif_title">WhereAmI</string>
+    <string name="notif_text_running">Отслеживание включено</string>
+    <string name="notif_text_sent">Отправлено в %1$s · %2$s</string>
+    <string name="notif_text_queue">В очереди: %1$d (повтор позже)</string>
+    <string name="notif_auth_error">Токен невалиден. Проверь настройки.</string>
+    <string name="notif_action_stop">Остановить</string>
+
+    <!-- Permissions -->
+    <string name="need_location_permission">Нужно разрешение на геолокацию</string>
+    <string name="need_background_permission">Нужно «Разрешать всегда» для работы в фоне</string>
+
+    <!-- Battery optimization -->
+    <string name="batt_opt_title">Чтобы не терялась связь</string>
+    <string name="batt_opt_message">Android может приостанавливать фоновые приложения и обрывать передачу координат. В следующем диалоге выбери «Разрешить», чтобы WhereAmI работал без перерыва.</string>
+    <string name="batt_opt_open">Открыть</string>
+    <string name="batt_opt_skip">Не сейчас</string>
+
+    <!-- Bottom navigation -->
+    <string name="tab_map">Карта</string>
+    <string name="tab_path">Путь</string>
+    <string name="tab_info">Инфо</string>
+    <string name="tab_logout">Выход</string>
+
+    <!-- Periods -->
+    <string name="period_today">Сегодня</string>
+    <string name="period_yesterday">Вчера</string>
+    <string name="period_week">Неделя</string>
+    <string name="period_month">Месяц</string>
+
+    <!-- Path / Info -->
+    <string name="path_empty">За выбранный период точек нет</string>
+    <string name="info_loading">Загружаю…</string>
+    <string name="info_distance">Пройдено: %1$s</string>
+    <string name="info_points">Точек в треке: %1$d</string>
+    <string name="info_first_last">С %1$s до %2$s</string>
+    <string name="info_error">Не удалось загрузить: %1$s</string>
+
+    <!-- Logout dialog -->
+    <string name="logout_confirm_title">Выйти?</string>
+    <string name="logout_confirm_message">Передача координат остановится. Маркер пропадёт с карты у других.</string>
+    <string name="logout_confirm_yes">Да, выйти</string>
+    <string name="logout_confirm_no">Отмена</string>
+
+    <!-- Keep-in-background switch -->
+    <string name="keep_bg_switch">Работать в фоновом режиме</string>
+    <string name="keep_bg_hint">Гарантирует, что отправка координат не будет остановлена системой</string>
+    <string name="keep_bg_walkthrough_title">Настройка фона</string>
+    <string name="keep_bg_walkthrough_msg">Сейчас откроются системные настройки: разреши WhereAmI работать без ограничений энергосбережения и в автозапуске. Приложение вернётся сюда после каждого шага.</string>
+    <string name="keep_bg_need_bg_location">Нужно разрешение «Всегда» для локации</string>
+</resources>

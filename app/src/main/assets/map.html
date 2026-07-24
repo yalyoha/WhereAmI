@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WhereAmI map</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0f1115; color: #e8eaf0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  #note { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px;
+    background: rgba(26,29,36,0.92); border: 1px solid #2a2e38; border-radius: 10px;
+    font-size: 13px; color: #8a90a0; display: none; }
+  #note.visible { display: block; }
+
+  /* Островок-табло сверху по центру */
+  #board {
+    position: absolute;
+    top: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 30;
+    display: none; flex-direction: column; gap: 4px;
+    padding: 8px 14px;
+    background: rgba(26, 29, 36, 0.92);
+    border: 1px solid #2a2e38;
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    min-width: 200px; max-width: calc(100vw - 32px);
+    font-size: 13px; color: #e8eaf0;
+  }
+  #board.visible { display: flex; }
+  .board-row { display: flex; align-items: center; gap: 8px; }
+  .board-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .board-name { flex: 1; font-weight: 500; }
+  .board-ago { color: #8a90a0; font-size: 12px; font-variant-numeric: tabular-nums; }
+</style>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=4df5159a-09a1-449c-ba51-e79660028321&lang=ru_RU"></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="board"></div>
+<div id="note">Нужно сохранить токен и логин</div>
+
+<script>
+(function () {
+  let map = null;
+  let placemarks = new Map();    // slug -> Placemark
+  let centeredOnMe = false;
+
+  ymaps.ready(function () {
+    map = new ymaps.Map('map', {
+      center: [59.568410, 30.122892],  // дефолтный центр (Лен.область), до первого fix
+      zoom: 12,
+      controls: ['zoomControl', 'geolocationControl', 'typeSelector']
+    });
+    if (window.Android) {
+      window.Android.requestUpdate();
+      setInterval(function(){ window.Android && window.Android.requestUpdate(); }, 15000);
+    }
+  });
+
+  function colorFor(u) {
+    if (!u.online) return '#666b78';
+    return u.color || '#4a90ff';
+  }
+
+  function balloon(u) {
+    const parts = [
+      '<b>' + escapeHtml(u.displayName || u.slug) + (u.isMe ? ' (я)' : '') + '</b>'
+    ];
+    if (u.lat != null) {
+      parts.push(u.lat.toFixed(5) + ', ' + u.lon.toFixed(5));
+      if (u.recordedAt) parts.push('<small>' + fmtTime(u.recordedAt) + '</small>');
+      if (u.battery != null) parts.push('<small>батарея: ' + u.battery + '%</small>');
+    }
+    return parts.join('<br>');
+  }
+
+  function fmtTime(unixSec) {
+    const diff = Math.max(0, Math.round(Date.now()/1000 - unixSec));
+    if (diff < 60)    return diff + ' c назад';
+    if (diff < 3600)  return Math.round(diff/60)   + ' мин назад';
+    if (diff < 86400) return Math.round(diff/3600) + ' ч назад';
+    return new Date(unixSec*1000).toLocaleString('ru-RU');
+  }
+
+  function fmtAgo(unixSec) {
+    const diff = Math.max(0, Math.round(Date.now()/1000 - unixSec));
+    if (diff < 60)    return 'сейчас';
+    if (diff < 3600)  return Math.round(diff/60)   + ' мин';
+    if (diff < 86400) return Math.round(diff/3600) + ' ч';
+    const d = new Date(unixSec*1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    return pad(d.getDate()) + '.' + pad(d.getMonth()+1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function renderBoard(users) {
+    const el = document.getElementById('board');
+    const active = users.filter(u => u.online && u.recordedAt != null);
+    if (active.length === 0) {
+      el.classList.remove('visible');
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = active.map(u => {
+      const color = u.color || '#4a90ff';
+      const name = escapeHtml((u.displayName || u.slug) + (u.isMe ? ' (я)' : ''));
+      return '<div class="board-row">'
+        + '<span class="board-dot" style="background:' + color + '"></span>'
+        + '<span class="board-name">' + name + '</span>'
+        + '<span class="board-ago">' + fmtAgo(u.recordedAt) + '</span>'
+        + '</div>';
+    }).join('');
+    el.classList.add('visible');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  function setNote(text) {
+    const n = document.getElementById('note');
+    if (!text) { n.classList.remove('visible'); return; }
+    n.textContent = text;
+    n.classList.add('visible');
+  }
+
+  // Вызывается из Kotlin через evaluateJavascript.
+  // jsonString — массив [{slug, displayName, color, online, isMe, lat?, lon?, recordedAt?, battery?}, ...]
+  window.onUsersUpdated = function(jsonString) {
+    if (!map) return;
+    let users;
+    try { users = JSON.parse(jsonString); } catch (e) { setNote('parse error'); return; }
+    setNote(null);
+    renderBoard(users);
+
+    const seen = new Set();
+    let myCoords = null;
+
+    users.forEach(u => {
+      seen.add(u.slug);
+      if (u.lat == null || u.lon == null) return;
+      const coords = [u.lat, u.lon];
+      const color  = colorFor(u);
+      const caption = (u.displayName || u.slug) + (u.isMe ? ' (я)' : '');
+      if (u.isMe) myCoords = coords;
+
+      const existing = placemarks.get(u.slug);
+      if (existing) {
+        existing.geometry.setCoordinates(coords);
+        existing.properties.set({ iconCaption: caption, balloonContent: balloon(u) });
+        existing.options.set('iconColor', color);
+      } else {
+        const pm = new ymaps.Placemark(coords,
+          { iconCaption: caption, balloonContent: balloon(u) },
+          { preset: 'islands#circleDotIcon', iconColor: color }
+        );
+        map.geoObjects.add(pm);
+        placemarks.set(u.slug, pm);
+      }
+    });
+
+    // Снять с карты тех, кого больше нет.
+    [...placemarks.keys()].forEach(slug => {
+      if (!seen.has(slug)) {
+        map.geoObjects.remove(placemarks.get(slug));
+        placemarks.delete(slug);
+      }
+    });
+
+    // Первый раз — центруем на свою точку, если есть.
+    if (myCoords && !centeredOnMe) {
+      map.setCenter(myCoords, 14, { duration: 300 });
+      centeredOnMe = true;
+    }
+  };
+
+  window.onUsersError = function(reason) {
+    setNote('Нужна авторизация (' + reason + ')');
+  };
+})();
+</script>
+</body>
+</html>
