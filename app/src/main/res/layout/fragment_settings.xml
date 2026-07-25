@@ -33,19 +33,48 @@
         android:layout_weight="1" />
 
     <TextView
-        android:id="@+id/settings_version"
+        android:id="@+id/settings_installed"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
         android:textAppearance="?attr/textAppearanceLabelSmall"
         android:textColor="@color/brand_on_gradient"
-        tools:text="v3.2 · build 5" />
+        tools:text="Установлено: v4.0 · build 13" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="4dp">
+
+        <TextView
+            android:id="@+id/settings_github"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="?attr/textAppearanceLabelSmall"
+            android:textColor="@color/brand_on_gradient"
+            tools:text="На GitHub: v4.0 · build 13" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/settings_update_btn"
+            style="@style/Widget.WhereAmI.Button.Period"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:minHeight="0dp"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="6dp"
+            android:enabled="false"
+            android:text="@string/settings_update_btn" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/settings_logout_link"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="12dp"
         android:gravity="center"
         android:padding="8dp"
         android:background="?attr/selectableItemBackground"

@@ -59,7 +59,12 @@
     <string name="info_points">Точек в треке: %1$d</string>
     <string name="info_first_last">С %1$s до %2$s</string>
     <string name="info_error">Не удалось загрузить: %1$s</string>
-    <string name="settings_version">v%1$s · build %2$d</string>
+    <string name="settings_installed">Установлено: v%1$s · build %2$d</string>
+    <string name="settings_github">На GitHub: v%1$s · build %2$d</string>
+    <string name="settings_github_loading">На GitHub: проверяю…</string>
+    <string name="settings_github_error">На GitHub: недоступно</string>
+    <string name="settings_update_btn">Обновить</string>
+    <string name="settings_update_up_to_date">Актуальна</string>
 
     <!-- Logout dialog -->
     <string name="logout_confirm_title">Выйти?</string>

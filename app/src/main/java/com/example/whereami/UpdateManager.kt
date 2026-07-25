@@ -60,6 +60,12 @@ class UpdateManager(private val context: Context) {
     /** Возвращает true если скачанный APK ожидает установки. */
     fun hasPendingApk(): Boolean = cachedApkFile().let { it.exists() && it.length() > 0 }
 
+    /** Публичное чтение установленной версии — для UI Settings. */
+    fun installedCode(): Int = installedVersionCode()
+
+    /** Публичный fetch последнего релиза с GitHub — для UI Settings. */
+    fun latestVersion(): VersionManifest? = fetchManifest()
+
     /** Запускает системный диалог установки для уже скачанного APK. */
     fun launchInstall() {
         val apk = cachedApkFile()

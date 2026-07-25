@@ -9,7 +9,12 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Таб «Настройки»: Switch «Работать в фоновом режиме», номер версии и ссылка «Выйти».
@@ -46,13 +51,64 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
             else settings.keepInBackground = false
         }
 
-        view.findViewById<TextView>(R.id.settings_version).text =
-            getString(R.string.settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+        view.findViewById<TextView>(R.id.settings_installed).text =
+            getString(R.string.settings_installed, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+
+        val githubTV = view.findViewById<TextView>(R.id.settings_github)
+        val updateBtn = view.findViewById<MaterialButton>(R.id.settings_update_btn)
+        githubTV.text = getString(R.string.settings_github_loading)
+        loadLatestVersion(githubTV, updateBtn)
 
         val logoutLink = view.findViewById<TextView>(R.id.settings_logout_link)
         logoutLink.paintFlags = logoutLink.paintFlags or Paint.UNDERLINE_TEXT_FLAG
         logoutLink.setOnClickListener {
             (requireActivity() as MainActivity).confirmLogout()
+        }
+    }
+
+    /**
+     * Читает `releases/latest` с GitHub, выводит в githubTV,
+     * зажигает updateBtn если installed < latest. Клик по кнопке —
+     * checkAndUpdate() (скачивает APK) + launchInstall() (системный диалог).
+     */
+    private fun loadLatestVersion(githubTV: TextView, updateBtn: MaterialButton) {
+        val manager = UpdateManager(requireContext())
+        val installedCode = manager.installedCode()
+        lifecycleScope.launch {
+            val latest = withContext(Dispatchers.IO) { manager.latestVersion() }
+            if (latest == null) {
+                githubTV.text = getString(R.string.settings_github_error)
+                updateBtn.isEnabled = false
+                updateBtn.text = getString(R.string.settings_update_btn)
+                return@launch
+            }
+            githubTV.text = getString(R.string.settings_github, latest.versionName, latest.versionCode)
+            if (latest.versionCode > installedCode) {
+                updateBtn.isEnabled = true
+                updateBtn.text = getString(R.string.settings_update_btn)
+                updateBtn.setOnClickListener {
+                    triggerUpdate(updateBtn)
+                }
+            } else {
+                updateBtn.isEnabled = false
+                updateBtn.text = getString(R.string.settings_update_up_to_date)
+            }
+        }
+    }
+
+    private fun triggerUpdate(updateBtn: MaterialButton) {
+        updateBtn.isEnabled = false
+        updateBtn.text = getString(R.string.settings_github_loading)
+        val manager = UpdateManager(requireContext())
+        lifecycleScope.launch {
+            val downloaded = withContext(Dispatchers.IO) { manager.checkAndUpdate() }
+            if (downloaded || manager.hasPendingApk()) {
+                manager.launchInstall()
+            } else {
+                // Ничего не скачалось (например уже up-to-date). Обновим статус.
+                updateBtn.isEnabled = false
+                updateBtn.text = getString(R.string.settings_update_up_to_date)
+            }
         }
     }
 
