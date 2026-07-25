@@ -23,9 +23,9 @@ server/api/config.php
 /whereami-*.png
 
 # Пользовательские скриншоты/фото с телефонов — могут содержать чувствительные данные (IMEI и т.п.)
-/IMG_*.jpg
-/IMG_*.jpeg
-/IMG_*.png
+/*.jpg
+/*.jpeg
+/screen*.png
 
 # Локальные секреты (например, GITHUB_TOKEN для скриптов) — НЕ КОММИТИТЬ
 .env

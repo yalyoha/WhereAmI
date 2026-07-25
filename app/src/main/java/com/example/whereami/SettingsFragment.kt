@@ -123,12 +123,31 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
 
     private fun advanceBackgroundWalk() {
         if (walker.needsBackgroundLocationPermission()) {
-            bgLocationLauncher.launch(BackgroundReliabilityWalker.BG_LOCATION_PERM)
+            try {
+                bgLocationLauncher.launch(BackgroundReliabilityWalker.BG_LOCATION_PERM)
+            } catch (t: Throwable) {
+                settings.lastError =
+                    "bgLocationLauncher.launch: ${t.javaClass.simpleName}: ${t.message ?: "(no message)"}"
+                revertKeepBgSwitch()
+            }
             return
         }
         val next = walker.nextRequiredIntent()
         if (next != null) {
-            systemSettingsLauncher.launch(next)
+            try {
+                systemSettingsLauncher.launch(next)
+            } catch (t: Throwable) {
+                // Например: vendor autostart Activity (Huawei) требует
+                // com.huawei.permission.external_app_settings.USE_COMPONENT
+                // — стороннее приложение его не имеет. Пропускаем этот шаг
+                // и идём дальше по визарду (batteryOpt мы уже прошли, значит
+                // остаётся только vendor — помечаем skipped и завершаем).
+                settings.lastError =
+                    "systemSettingsLauncher.launch(${next.component}): " +
+                    "${t.javaClass.simpleName}: ${t.message ?: "(no message)"}"
+                walker.markVendorAutostartSkipped()
+                advanceBackgroundWalk()   // рекурсивно идём к следующему шагу
+            }
             return
         }
         // Визард пройден.

@@ -25,11 +25,22 @@ import androidx.core.content.ContextCompat
  */
 class BackgroundReliabilityWalker(private val context: Context) {
 
+    /**
+     * Флаг: пробовали открыть вендорский autostart-экран и он провалился
+     * (SecurityException и т.п. — например, Huawei требует внутреннего
+     * permission USE_COMPONENT, которого у сторонних приложений нет).
+     * Пропускаем этот шаг, дальнейшие вызовы nextRequiredIntent его игнорируют.
+     */
+    private var vendorAutostartSkipped: Boolean = false
+
+    /** Помечаем vendor-autostart шаг как «недоступный, пропустить». */
+    fun markVendorAutostartSkipped() { vendorAutostartSkipped = true }
+
     /** Следующий системный экран, который нужно показать пользователю. */
     fun nextRequiredIntent(): Intent? {
         if (needsBackgroundLocationPermission()) return null // выдаётся через RequestPermission
         if (!isBatteryOptIgnored()) return batteryOptIntent()
-        vendorAutostartIntent()?.let { return it }
+        if (!vendorAutostartSkipped) vendorAutostartIntent()?.let { return it }
         return null
     }
 
