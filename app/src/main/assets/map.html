@@ -13,26 +13,25 @@
     font-size: 14px; color: #212121; display: none; text-align: center; }
   #note.visible { display: block; }
 
-  /* Островок-табло сверху по центру */
+  /* Островок-табло сверху по центру — белый на 0.9, тёмный текст. */
   #board {
     position: absolute;
     top: 12px; left: 50%; transform: translateX(-50%);
     z-index: 30;
     display: none; flex-direction: column; gap: 4px;
     padding: 8px 14px;
-    background: rgba(26, 29, 36, 0.92);
-    border: 1px solid #2a2e38;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: 14px;
     backdrop-filter: blur(8px);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     min-width: 200px; max-width: calc(100vw - 32px);
-    font-size: 13px; color: #e8eaf0;
+    font-size: 13px; color: #212121;
   }
   #board.visible { display: flex; }
   .board-row { display: flex; align-items: center; gap: 8px; }
   .board-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
   .board-name { flex: 1; font-weight: 500; }
-  .board-ago { color: #8a90a0; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .board-ago { color: #757575; font-size: 12px; font-variant-numeric: tabular-nums; }
 </style>
 <script src="https://api-maps.yandex.ru/2.1/?apikey=4df5159a-09a1-449c-ba51-e79660028321&lang=ru_RU"></script>
 </head>
@@ -84,14 +83,13 @@
     return new Date(unixSec*1000).toLocaleString('ru-RU');
   }
 
+  // Синхронно с веб-Map.vue: клиент считается online если последняя точка
+  // свежее 20 мин — тогда не пишем «X мин назад» (лишний шум), только
+  // после 20 мин → «не в сети».
+  var OFFLINE_AFTER_SEC = 20 * 60;
   function fmtAgo(unixSec) {
     const diff = Math.max(0, Math.round(Date.now()/1000 - unixSec));
-    if (diff < 60)    return 'сейчас';
-    if (diff < 3600)  return Math.round(diff/60)   + ' мин';
-    if (diff < 86400) return Math.round(diff/3600) + ' ч';
-    const d = new Date(unixSec*1000);
-    const pad = (n) => String(n).padStart(2, '0');
-    return pad(d.getDate()) + '.' + pad(d.getMonth()+1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return diff < OFFLINE_AFTER_SEC ? '' : 'не в сети';
   }
 
   function renderBoard(users) {
