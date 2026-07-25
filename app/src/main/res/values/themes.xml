@@ -22,6 +22,6 @@
     <style name="Widget.WhereAmI.Button.Period" parent="Widget.Material3.Button">
         <item name="strokeWidth">0dp</item>
         <item name="backgroundTint">@color/period_button_background</item>
-        <item name="android:textColor">@color/brand_on_gradient</item>
+        <item name="android:textColor">@color/brand_dark</item>
     </style>
 </resources>

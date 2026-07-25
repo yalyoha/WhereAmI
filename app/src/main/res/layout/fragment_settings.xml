@@ -15,6 +15,7 @@
         app:trackTint="@color/brand_dark"
         app:trackDecorationTint="@color/brand_dark"
         app:thumbTint="@color/brand_orange"
+        android:textColor="@color/brand_on_gradient"
         android:text="@string/keep_bg_switch" />
 
     <TextView
@@ -23,6 +24,7 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
         android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="@color/brand_on_gradient"
         android:text="@string/keep_bg_hint" />
 
     <Space

@@ -44,6 +44,7 @@
         android:gravity="center"
         android:textSize="32sp"
         android:textStyle="bold"
+        android:textColor="@color/brand_on_gradient"
         tools:text="12.5 км"
         xmlns:tools="http://schemas.android.com/tools" />
 
@@ -54,6 +55,7 @@
         android:layout_marginTop="12dp"
         android:gravity="center"
         android:textSize="16sp"
+        android:textColor="@color/brand_on_gradient"
         tools:text="Точек: 128"
         xmlns:tools="http://schemas.android.com/tools" />
 
