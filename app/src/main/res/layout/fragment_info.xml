@@ -15,21 +15,21 @@
         app:selectionRequired="true">
         <com.google.android.material.button.MaterialButton
             android:id="@+id/info_period_today"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.WhereAmI.Button.Period"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/period_today" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/info_period_week"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.WhereAmI.Button.Period"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/period_week" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/info_period_month"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.WhereAmI.Button.Period"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -64,7 +64,7 @@
         android:layout_marginTop="8dp"
         android:gravity="center"
         android:textSize="14sp"
-        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textColor="@color/brand_on_gradient"
         tools:text="С 00:15 до 23:42"
         xmlns:tools="http://schemas.android.com/tools" />
 

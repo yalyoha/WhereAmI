@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Кнопки периодов в Info/Path: выбранная — чуть плотнее; невыбранная — 50% белого. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="#CCFFFFFF" />
+    <item android:color="@color/brand_translucent_white" />
+</selector>

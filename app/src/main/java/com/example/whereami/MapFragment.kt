@@ -34,6 +34,9 @@ class MapFragment : Fragment(R.layout.fragment_map) {
         settings = SettingsRepository(requireContext())
         val web = view.findViewById<WebView>(R.id.map_web)
         webView = web
+        // Прозрачный фон WebView — сквозь него виден фирменный градиент активити,
+        // пока карта грузится или в редких прозрачных зонах тайлов.
+        web.setBackgroundColor(0)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.addJavascriptInterface(MapBridge(), "Android")

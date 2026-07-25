@@ -17,7 +17,11 @@
         android:id="@+id/bottom_nav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:labelVisibilityMode="labeled"
+        android:background="@color/brand_translucent_white"
+        app:backgroundTint="@color/brand_translucent_white"
+        app:labelVisibilityMode="unlabeled"
+        app:itemIconTint="@color/brand_dark"
+        app:itemActiveIndicatorStyle="@style/Widget.WhereAmI.BottomNav.ActiveIndicator"
         app:menu="@menu/bottom_nav_menu" />
 
 </LinearLayout>

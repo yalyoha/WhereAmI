@@ -1,9 +1,27 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.WhereAmI" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <!-- Фирменный градиент как фон окна: pink → orange (см. bg_gradient) -->
+        <item name="android:windowBackground">@drawable/bg_gradient</item>
+        <!-- Текст поверх градиента: полупрозрачный белый. Явные textColor в лейаутах
+             (например, тёмные надписи внутри белых кнопок) переопределяют это. -->
+        <item name="android:textColorPrimary">@color/brand_on_gradient</item>
+        <item name="android:textColorSecondary">@color/brand_on_gradient</item>
     </style>
 
     <style name="Theme.WhereAmI" parent="Base.Theme.WhereAmI" />
+
+    <!-- Индикатор активной вкладки в BottomNav: полупрозрачный белый -->
+    <style name="Widget.WhereAmI.BottomNav.ActiveIndicator"
+        parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">@color/brand_translucent_white</item>
+    </style>
+
+    <!-- Кнопка периода (Сегодня/Вчера/Неделя/Месяц): без бордера,
+         фон rgba(255,255,255,0.5) в невыбранном, чуть плотнее в выбранном. -->
+    <style name="Widget.WhereAmI.Button.Period" parent="Widget.Material3.Button">
+        <item name="strokeWidth">0dp</item>
+        <item name="backgroundTint">@color/period_button_background</item>
+        <item name="android:textColor">@color/brand_on_gradient</item>
+    </style>
 </resources>

@@ -4,4 +4,11 @@
     <color name="white">#FFFFFFFF</color>
     <color name="accent">#FF4A90FF</color>
     <color name="arriving">#FFFF6B35</color>
+
+    <!-- Фирменные цвета WhereAmI -->
+    <color name="brand_pink">#E52E71</color>
+    <color name="brand_orange">#FF8A00</color>
+    <color name="brand_dark">#212121</color>
+    <color name="brand_translucent_white">#80FFFFFF</color>
+    <color name="brand_on_gradient">#E6FFFFFF</color>
 </resources>

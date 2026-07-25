@@ -39,6 +39,8 @@ class PathFragment : Fragment(R.layout.fragment_path) {
 
         val web = view.findViewById<WebView>(R.id.path_web)
         webView = web
+        // Прозрачный фон — сквозь WebView виден фирменный градиент.
+        web.setBackgroundColor(0)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         web.webViewClient = WebViewClient()

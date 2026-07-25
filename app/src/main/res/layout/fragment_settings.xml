@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -11,6 +12,9 @@
         android:id="@+id/settings_keep_bg_switch"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        app:trackTint="@color/brand_dark"
+        app:trackDecorationTint="@color/brand_dark"
+        app:thumbTint="@color/brand_orange"
         android:text="@string/keep_bg_switch" />
 
     <TextView
@@ -32,7 +36,7 @@
         android:layout_height="wrap_content"
         android:gravity="center"
         android:textAppearance="?attr/textAppearanceLabelSmall"
-        android:textColor="?attr/colorOutline"
+        android:textColor="@color/brand_on_gradient"
         tools:text="v3.2 · build 5" />
 
     <TextView
@@ -44,6 +48,6 @@
         android:padding="8dp"
         android:background="?attr/selectableItemBackground"
         android:textAppearance="?attr/textAppearanceLabelSmall"
-        android:textColor="?attr/colorOutline"
+        android:textColor="@color/brand_on_gradient"
         android:text="@string/btn_logout" />
 </LinearLayout>

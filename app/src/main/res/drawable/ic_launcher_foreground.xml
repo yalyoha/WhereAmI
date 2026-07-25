@@ -1,53 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  WhereAmI app icon. Стилизовано под loading.io/icon/search-computer:
-  монитор (белый экран в сером корпусе) + лупа поверх экрана.
-  Vector drawable, 108x108 — стандартный размер для Android adaptive icon.
-  Контент сосредоточен в безопасной зоне (центр ~66x66).
+  WhereAmI adaptive icon foreground: розовое сердце (#E52E71), вписанное
+  в безопасную зону 72dp в центре 108dp канвы. Фон — оранжевый круг
+  (ic_launcher_background), поверх — это сердце. Лаунчер применит
+  свою маску (круг/squircle) поверх результата.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Корпус монитора (тёмный контур) -->
     <path
-        android:fillColor="#222222"
-        android:pathData="M22,28 L86,28 A2,2 0 0 1 88,30 L88,68 A2,2 0 0 1 86,70 L22,70 A2,2 0 0 1 20,68 L20,30 A2,2 0 0 1 22,28 Z" />
-
-    <!-- Экран (белый) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M24,32 L84,32 L84,66 L24,66 Z" />
-
-    <!-- Нижняя планка (между экраном и подставкой, тёмно-серая) -->
-    <path
-        android:fillColor="#555555"
-        android:pathData="M19,70 L89,70 A2,2 0 0 1 87,74 L21,74 A2,2 0 0 1 19,70 Z" />
-
-    <!-- Подставка (серая трапеция) -->
-    <path
-        android:fillColor="#9A9A9A"
-        android:pathData="M45,74 L43,84 L39,84 A2,2 0 0 0 39,88 L69,88 A2,2 0 0 0 69,84 L65,84 L63,74 Z" />
-
-    <!-- Лупа: окантовка (тёмная) -->
-    <path
-        android:fillColor="#3D5F73"
-        android:pathData="M57,38 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 Z" />
-
-    <!-- Лупа: голубое заполнение линзы -->
-    <path
-        android:fillColor="#77A4BD"
-        android:pathData="M57,38 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0 Z" />
-
-    <!-- Лупа: блик на линзе (более светлый голубой) -->
-    <path
-        android:fillColor="#B6D2E0"
-        android:pathData="M51,33 A4,4 0 0 1 55,37 L51,37 Z" />
-
-    <!-- Ручка лупы -->
-    <path
-        android:fillColor="#3D5F73"
-        android:pathData="M66,48 L75,57 A2,2 0 0 1 72,60 L63,51 Z" />
+        android:fillColor="@color/brand_pink"
+        android:pathData="M54,86 C54,86 22,64 22,42 C22,30 30,22 40,22 C46,22 51,25 54,30 C57,25 62,22 68,22 C78,22 86,30 86,42 C86,64 54,86 54,86 Z" />
 </vector>
