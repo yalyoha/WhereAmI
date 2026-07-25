@@ -56,8 +56,12 @@ class LocationService : Service() {
 
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Адаптивный интервал по расстоянию:
-    private var intervalMs: Long = INTERVAL_DEFAULT_MS
+    // Адаптивный интервал по расстоянию.
+    // Стартуем с BOOTSTRAP (1 сек) — чтобы первый fix пришёл быстро и
+    // клиент сразу появился online на веб-карте. Дальше adaptive
+    // логика поднимает интервал вплоть до INTERVAL_DEFAULT_MS (10 мин)
+    // если клиент стоит на месте.
+    private var intervalMs: Long = INTERVAL_MIN_MS
     private var closeStreak: Int = 0
     private var lastLat: Double? = null
     private var lastLon: Double? = null
