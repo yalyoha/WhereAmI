@@ -18,3 +18,7 @@ local.properties
 # Серверные секреты — НЕ КОММИТИТЬ
 server/api/config.php
 
+# Playwright MCP артефакты (снимки/трейсы), которые создаются при верификации UI
+/.playwright-mcp/
+/whereami-*.png
+
