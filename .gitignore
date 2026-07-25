@@ -26,3 +26,8 @@ server/api/config.php
 .env
 .env.local
 
+# Release keystore — НЕ КОММИТИТЬ (генерится один раз, base64 хранится в GitHub Secrets)
+*.jks
+*.keystore
+keystore.b64.txt
+

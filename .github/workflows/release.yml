@@ -18,8 +18,30 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "ERROR: secret RELEASE_KEYSTORE_BASE64 is not set — сборка будет с CI-debug keystore, " \
+                 "что несовместимо с ранее установленным APK. Добавь секреты RELEASE_KEYSTORE_BASE64," \
+                 "RELEASE_KEYSTORE_STORE_PASS, RELEASE_KEYSTORE_KEY_ALIAS, RELEASE_KEYSTORE_KEY_PASS." >&2
+            exit 1
+          fi
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > whereami-release.jks
+          test -s whereami-release.jks
+
       - name: Build release APK
+        env:
+          RELEASE_KEYSTORE_PATH:       whereami-release.jks
+          RELEASE_KEYSTORE_STORE_PASS: ${{ secrets.RELEASE_KEYSTORE_STORE_PASS }}
+          RELEASE_KEYSTORE_KEY_ALIAS:  ${{ secrets.RELEASE_KEYSTORE_KEY_ALIAS }}
+          RELEASE_KEYSTORE_KEY_PASS:   ${{ secrets.RELEASE_KEYSTORE_KEY_PASS }}
         run: ./gradlew :app:assembleRelease
+
+      - name: Wipe keystore from runner (paranoia)
+        if: always()
+        run: rm -f whereami-release.jks
 
       - name: Extract versionCode
         id: v

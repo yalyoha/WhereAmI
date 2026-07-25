@@ -9,6 +9,32 @@ plugins {
 // Имя выходного APK: WhereAmI-debug.apk / WhereAmI-release.apk
 base { archivesName.set("WhereAmI") }
 
+// Читаем креды release-keystore из env vars (в CI подаются через GitHub Secrets)
+// или из локального .env в корне (для локальной сборки). Отсутствие любого поля
+// означает «keystore не настроен» → падаем на debug-signingConfig.
+val releaseStoreFile: File? = run {
+    val fromEnv = System.getenv("RELEASE_KEYSTORE_PATH")
+    val path = if (!fromEnv.isNullOrBlank()) fromEnv else {
+        val dotenv = rootProject.file(".env")
+        if (dotenv.exists()) {
+            dotenv.readLines()
+                .firstOrNull { it.startsWith("RELEASE_KEYSTORE_PATH=") }
+                ?.substringAfter("=")?.trim()
+        } else null
+    }
+    path?.let { rootProject.file(it) }?.takeIf { it.exists() }
+}
+val releaseCreds: Map<String, String>? = releaseStoreFile?.let {
+    fun read(key: String): String? = System.getenv(key)
+        ?: rootProject.file(".env").takeIf { f -> f.exists() }?.readLines()
+            ?.firstOrNull { it.startsWith("$key=") }?.substringAfter("=")?.trim()
+    val store = read("RELEASE_KEYSTORE_STORE_PASS")
+    val alias = read("RELEASE_KEYSTORE_KEY_ALIAS")
+    val key   = read("RELEASE_KEYSTORE_KEY_PASS")
+    if (store != null && alias != null && key != null)
+        mapOf("store" to store, "alias" to alias, "key" to key) else null
+}
+
 android {
     namespace = "com.example.whereami"
     compileSdk {
@@ -21,8 +47,8 @@ android {
         applicationId = "com.example.whereami"
         minSdk = 29
         targetSdk = 36
-        versionCode = 14
-        versionName = "4.1"
+        versionCode = 15
+        versionName = "4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,6 +73,17 @@ android {
         abortOnError = false
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null && releaseCreds != null) {
+            create("release") {
+                storeFile     = releaseStoreFile
+                storePassword = releaseCreds["store"]
+                keyAlias      = releaseCreds["alias"]
+                keyPassword   = releaseCreds["key"]
+            }
+        }
+    }
+
     buildTypes {
         release {
             // R8 shrinking + resource shrinking — даёт минимальный APK.
@@ -56,8 +93,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Для личной установки подписываем debug-ключом (Play Store не нужен).
-            signingConfig = signingConfigs.getByName("debug")
+            // Постоянный release-keystore если настроен, иначе debug (для эмуляторных
+            // тестовых сборок). Только release-сборки подписанные жёстким keystore
+            // могут OTA-обновляться поверх ранее установленной.
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

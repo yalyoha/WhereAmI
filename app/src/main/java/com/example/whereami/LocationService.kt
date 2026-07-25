@@ -44,7 +44,10 @@ import kotlinx.coroutines.launch
  */
 class LocationService : Service() {
 
-    private lateinit var fused: FusedLocationProviderClient
+    // fused — nullable: на устройствах без Google Play Services
+    // (Huawei EMUI/HarmonyOS, RE-ROMы) getFusedLocationProviderClient() бросает.
+    // В таком случае сервис аккуратно останавливается, приложение не крашится.
+    private var fused: FusedLocationProviderClient? = null
     private lateinit var settings: SettingsRepository
     private lateinit var queue: UploadQueue
     private lateinit var api: ApiClient
@@ -77,7 +80,12 @@ class LocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        fused    = LocationServices.getFusedLocationProviderClient(this)
+        fused    = try {
+            LocationServices.getFusedLocationProviderClient(this)
+        } catch (t: Throwable) {
+            Log.w(TAG, "GMS FusedLocationProviderClient unavailable: ${t.message}")
+            null
+        }
         settings = SettingsRepository(this)
         queue    = UploadQueue(this)
         api      = ApiClient(settings.serverUrl)
@@ -101,6 +109,11 @@ class LocationService : Service() {
         }
         if (!settings.isConfigured()) {
             Log.w(TAG, "Не сконфигурирован токен/slug — stopping")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (fused == null) {
+            Log.w(TAG, "GMS FusedLocationProviderClient недоступен (нет Google Play Services) — stopping")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -128,6 +141,10 @@ class LocationService : Service() {
     }
 
     private fun applyRequest(interval: Long) {
+        val client = fused ?: run {
+            Log.w(TAG, "applyRequest: fused null — stop")
+            stopSelf(); return
+        }
         // Ниже 30 сек — считаем, что клиент движется: включаем HIGH_ACCURACY.
         // На больших интервалах BALANCED экономит батарею.
         val priority = if (interval <= 30_000L) Priority.PRIORITY_HIGH_ACCURACY
@@ -140,10 +157,10 @@ class LocationService : Service() {
             .build()
         try {
             // requestLocationUpdates с тем же callback'ом просто перезапишет конфиг (не плодит подписки).
-            fused.requestLocationUpdates(req, callback, Looper.getMainLooper())
+            client.requestLocationUpdates(req, callback, Looper.getMainLooper())
             Log.d(TAG, "locationRequest interval=${interval}ms priority=$priority")
-        } catch (sec: SecurityException) {
-            Log.w(TAG, "requestLocationUpdates: $sec")
+        } catch (t: Throwable) {
+            Log.w(TAG, "requestLocationUpdates failed: ${t.message}")
             stopSelf()
         }
     }
@@ -236,7 +253,7 @@ class LocationService : Service() {
     }
 
     private fun stopAll() {
-        try { fused.removeLocationUpdates(callback) } catch (_: Throwable) {}
+        try { fused?.removeLocationUpdates(callback) } catch (_: Throwable) {}
     }
     private fun stopAllAndStop() {
         stopAll()
