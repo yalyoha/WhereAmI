@@ -11,6 +11,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
@@ -31,23 +33,29 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Foreground location service по контракту ANDROID-TASK § 3.1–3.3:
- *   - FusedLocationProviderClient с адаптивным режимом:
- *       SLOW (по умолчанию): interval 60s, PRIORITY_BALANCED_POWER_ACCURACY — пешеход/стоянка.
- *       FAST (speed ≥ 3 м/с): interval 15s, PRIORITY_HIGH_ACCURACY — велосипед/авто.
- *       Возврат в SLOW при скорости <1.5 м/с (гистерезис).
- *   - На каждую точку: читаем battery, POST в /api/location
- *   - 200 ok / 200 thinned → лог, обновили lastSendAt
- *   - 400 → лог, дроп (повторять бесполезно)
- *   - 401 → стоп сервиса + уведомление "токен невалиден"
- *   - 5xx / сеть → enqueue в UploadQueue + kick RetryWorker
+ * Foreground location service — адаптивный интервал по дистанции,
+ * два источника координат (Fused GMS → fallback system LocationManager).
+ *
+ * Интервал: см. adjustIntervalForDistance — от 1 сек (быстрое движение)
+ * до 10 мин (стоим на месте), halves/doubles между.
+ *
+ * Источник:
+ *   - Primary: FusedLocationProviderClient (Google Play Services).
+ *   - Fallback: android.location.LocationManager — для Huawei EMUI/HarmonyOS
+ *     без GMS, кастом-ROMов. Provider выбирается по интервалу:
+ *     ≤30с → GPS, иначе FUSED_PROVIDER (API 31+) / NETWORK / GPS.
+ *
+ * На каждую точку: читаем battery, POST в /api/location.
+ * 200 ok / thinned → лог. 401 → стоп + notif. 400 → drop. 5xx/сеть → UploadQueue + RetryWorker.
  */
 class LocationService : Service() {
 
-    // fused — nullable: на устройствах без Google Play Services
-    // (Huawei EMUI/HarmonyOS, RE-ROMы) getFusedLocationProviderClient() бросает.
-    // В таком случае сервис аккуратно останавливается, приложение не крашится.
+    // Один из двух источников координат:
+    //   - Fused (GMS) — на телефонах с Google Play Services (Pixel, Samsung, Xiaomi, etc.)
+    //   - LocationManager (system) — fallback для Huawei EMUI/HarmonyOS без GMS, кастом-ROMов.
+    // Выбор делается в onCreate: сначала пробуем Fused, при ошибке — sysLm.
     private var fused: FusedLocationProviderClient? = null
+    private var sysLm: LocationManager? = null
     private lateinit var settings: SettingsRepository
     private lateinit var queue: UploadQueue
     private lateinit var api: ApiClient
@@ -73,18 +81,30 @@ class LocationService : Service() {
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
-            adjustIntervalForDistance(loc)
-            scope.launch { handleLocation(loc) }
+            onNewFix(loc)
         }
+    }
+
+    // Listener для системного LocationManager (fallback без GMS).
+    // LocationListener — SAM (functional interface), достаточно onLocationChanged.
+    private val sysListener = LocationListener { loc -> onNewFix(loc) }
+
+    private fun onNewFix(loc: Location) {
+        adjustIntervalForDistance(loc)
+        scope.launch { handleLocation(loc) }
     }
 
     override fun onCreate() {
         super.onCreate()
-        fused    = try {
+        fused = try {
             LocationServices.getFusedLocationProviderClient(this)
         } catch (t: Throwable) {
             Log.w(TAG, "GMS FusedLocationProviderClient unavailable: ${t.message}")
             null
+        }
+        if (fused == null) {
+            sysLm = getSystemService(LOCATION_SERVICE) as? LocationManager
+            Log.i(TAG, "using system LocationManager fallback (GMS отсутствует)")
         }
         settings = SettingsRepository(this)
         queue    = UploadQueue(this)
@@ -112,8 +132,8 @@ class LocationService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (fused == null) {
-            Log.w(TAG, "GMS FusedLocationProviderClient недоступен (нет Google Play Services) — stopping")
+        if (fused == null && sysLm == null) {
+            Log.w(TAG, "Нет ни GMS-Fused, ни системного LocationManager — stopping")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -141,24 +161,54 @@ class LocationService : Service() {
     }
 
     private fun applyRequest(interval: Long) {
-        val client = fused ?: run {
-            Log.w(TAG, "applyRequest: fused null — stop")
-            stopSelf(); return
-        }
-        // Ниже 30 сек — считаем, что клиент движется: включаем HIGH_ACCURACY.
-        // На больших интервалах BALANCED экономит батарею.
-        val priority = if (interval <= 30_000L) Priority.PRIORITY_HIGH_ACCURACY
-                       else Priority.PRIORITY_BALANCED_POWER_ACCURACY
-        val req = LocationRequest.Builder(interval)
-            .setMinUpdateIntervalMillis(interval)
-            .setMaxUpdateDelayMillis(interval)
-            .setPriority(priority)
-            .setWaitForAccurateLocation(false)
-            .build()
+        val client = fused
+        val lm = sysLm
         try {
-            // requestLocationUpdates с тем же callback'ом просто перезапишет конфиг (не плодит подписки).
-            client.requestLocationUpdates(req, callback, Looper.getMainLooper())
-            Log.d(TAG, "locationRequest interval=${interval}ms priority=$priority")
+            when {
+                client != null -> {
+                    // Ниже 30 сек — считаем, что клиент движется: включаем HIGH_ACCURACY.
+                    // На больших интервалах BALANCED экономит батарею.
+                    val priority = if (interval <= 30_000L) Priority.PRIORITY_HIGH_ACCURACY
+                                   else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+                    val req = LocationRequest.Builder(interval)
+                        .setMinUpdateIntervalMillis(interval)
+                        .setMaxUpdateDelayMillis(interval)
+                        .setPriority(priority)
+                        .setWaitForAccurateLocation(false)
+                        .build()
+                    // requestLocationUpdates с тем же callback'ом просто перезапишет конфиг.
+                    client.requestLocationUpdates(req, callback, Looper.getMainLooper())
+                    Log.d(TAG, "Fused interval=${interval}ms priority=$priority")
+                }
+                lm != null -> {
+                    // Системный LocationManager: провайдер выбираем по «активности» клиента.
+                    // Интервал ≤ 30 сек = движение → GPS_PROVIDER (высокая точность).
+                    // Иначе — FUSED_PROVIDER (system-side, API 31+) или GPS в fallback.
+                    val provider = when {
+                        interval <= 30_000L -> LocationManager.GPS_PROVIDER
+                        Build.VERSION.SDK_INT >= 31 &&
+                            lm.getProviders(true).contains(LocationManager.FUSED_PROVIDER)
+                            -> LocationManager.FUSED_PROVIDER
+                        lm.getProviders(true).contains(LocationManager.NETWORK_PROVIDER)
+                            -> LocationManager.NETWORK_PROVIDER
+                        else -> LocationManager.GPS_PROVIDER
+                    }
+                    // Пере-подписка: сначала снимаем прежнюю, потом ставим новую с новым интервалом.
+                    lm.removeUpdates(sysListener)
+                    lm.requestLocationUpdates(
+                        provider,
+                        interval,      // minTime — приблизительный интервал между fix'ами
+                        0f,            // minDistance — 0, наша адаптивная логика решает сама
+                        sysListener,
+                        Looper.getMainLooper()
+                    )
+                    Log.d(TAG, "SysLocationManager interval=${interval}ms provider=$provider")
+                }
+                else -> {
+                    Log.w(TAG, "applyRequest: нет источника локации — stop")
+                    stopSelf()
+                }
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "requestLocationUpdates failed: ${t.message}")
             stopSelf()
@@ -254,6 +304,7 @@ class LocationService : Service() {
 
     private fun stopAll() {
         try { fused?.removeLocationUpdates(callback) } catch (_: Throwable) {}
+        try { sysLm?.removeUpdates(sysListener) } catch (_: Throwable) {}
     }
     private fun stopAllAndStop() {
         stopAll()
