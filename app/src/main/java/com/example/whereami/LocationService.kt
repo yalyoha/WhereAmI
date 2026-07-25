@@ -120,28 +120,43 @@ class LocationService : Service() {
         }
 
         // Foreground заводим до запроса локации (требование Android 14+).
-        startInForeground(buildNotification(getString(R.string.notif_text_running)))
-
-        if (!hasLocationPermission()) {
-            Log.w(TAG, "No location permission — stopping")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (!settings.isConfigured()) {
-            Log.w(TAG, "Не сконфигурирован токен/slug — stopping")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (fused == null && sysLm == null) {
-            Log.w(TAG, "Нет ни GMS-Fused, ни системного LocationManager — stopping")
+        // На Android 14+ startForeground с типом LOCATION может выбросить
+        // ForegroundServiceStartNotAllowedException (например, если сервис
+        // стартовали из фона без активной Activity) — ловим, чтобы не крашить процесс.
+        try {
+            startInForeground(buildNotification(getString(R.string.notif_text_running)))
+        } catch (t: Throwable) {
+            saveError("startForeground", t)
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // API client пересоздаём — serverUrl мог поменяться в Settings.
-        api = ApiClient(settings.serverUrl)
-        requestUpdates()
-        return START_STICKY
+        try {
+            if (!hasLocationPermission()) {
+                Log.w(TAG, "No location permission — stopping")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            if (!settings.isConfigured()) {
+                Log.w(TAG, "Не сконфигурирован токен/slug — stopping")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            if (fused == null && sysLm == null) {
+                Log.w(TAG, "Нет ни GMS-Fused, ни системного LocationManager — stopping")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            // API client пересоздаём — serverUrl мог поменяться в Settings.
+            api = ApiClient(settings.serverUrl)
+            requestUpdates()
+            return START_STICKY
+        } catch (t: Throwable) {
+            saveError("onStartCommand", t)
+            stopSelf()
+            return START_NOT_STICKY
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -150,6 +165,13 @@ class LocationService : Service() {
         stopAll()
         scope.cancel()
         super.onDestroy()
+    }
+
+    /** Сохраняет строку ошибки в SettingsRepository — MainActivity.onResume её покажет в AlertDialog. */
+    private fun saveError(where: String, t: Throwable) {
+        val msg = "$where: ${t.javaClass.simpleName}: ${t.message ?: "(no message)"}"
+        Log.w(TAG, msg)
+        try { settings.lastError = msg } catch (_: Throwable) {}
     }
 
     private fun startInForeground(notif: Notification) {
@@ -210,7 +232,7 @@ class LocationService : Service() {
                 }
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "requestLocationUpdates failed: ${t.message}")
+            saveError("requestLocationUpdates", t)
             stopSelf()
         }
     }
@@ -417,12 +439,20 @@ class LocationService : Service() {
 
         fun start(context: Context) {
             val i = Intent(context, LocationService::class.java)
-            ContextCompat.startForegroundService(context, i)
+            // На Android 12+ startForegroundService из ограниченного контекста
+            // может бросить ForegroundServiceStartNotAllowedException — не крашим caller'а.
+            try {
+                ContextCompat.startForegroundService(context, i)
+            } catch (t: Throwable) {
+                val msg = "LocationService.start: ${t.javaClass.simpleName}: ${t.message ?: "(no message)"}"
+                Log.w("LocationService", msg)
+                try { SettingsRepository(context).lastError = msg } catch (_: Throwable) {}
+            }
         }
 
         fun stop(context: Context) {
             val i = Intent(context, LocationService::class.java).setAction(ACTION_STOP)
-            context.startService(i)
+            try { context.startService(i) } catch (_: Throwable) {}
         }
     }
 }

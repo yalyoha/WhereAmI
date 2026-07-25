@@ -106,6 +106,22 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         checkPendingUpdate()
+        showLastErrorIfAny()
+    }
+
+    private fun showLastErrorIfAny() {
+        val err = settings.lastError
+        if (err.isEmpty()) return
+        settings.lastError = ""   // очищаем до показа, чтобы диалог не всплывал повторно
+        AlertDialog.Builder(this)
+            .setTitle("Ошибка в фоне")
+            .setMessage(err)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNeutralButton("Скопировать") { _, _ ->
+                val cm = getSystemService(android.content.ClipboardManager::class.java)
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("WhereAmI error", err))
+            }
+            .show()
     }
 
     private fun checkPendingUpdate() {

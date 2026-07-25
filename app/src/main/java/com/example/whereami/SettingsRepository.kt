@@ -44,6 +44,15 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean(KEY_KEEP_BG, false)
         set(v) = prefs.edit().putBoolean(KEY_KEEP_BG, v).apply()
 
+    /**
+     * Последняя ошибка из LocationService/BootReceiver, которую нельзя было показать
+     * сразу (сервис в фоне — не может показать диалог). MainActivity.onResume её
+     * покажет и очистит. Пусто = никаких ошибок с прошлого показа.
+     */
+    var lastError: String
+        get() = prefs.getString(KEY_LAST_ERROR, "").orEmpty()
+        set(v) = prefs.edit().putString(KEY_LAST_ERROR, v).apply()
+
     fun isConfigured(): Boolean =
         token.length == 32 && mySlug.isNotEmpty()
 
@@ -81,5 +90,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_SHARE            = "sharing_enabled"
         private const val KEY_BATT_OPT_ASKED   = "batt_opt_asked"
         private const val KEY_KEEP_BG          = "keep_in_background"
+        private const val KEY_LAST_ERROR       = "last_error"
     }
 }
