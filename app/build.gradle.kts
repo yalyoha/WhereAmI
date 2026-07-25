@@ -29,11 +29,10 @@ android {
         // Базовый URL API — слэш в конце обязателен. Можно переопределить в Settings.
         buildConfigField("String", "API_BASE_URL", "\"https://whereami.alekseylosev.ru/api/\"")
         // GitHub Releases API — источник манифеста автообновления.
-        // TODO(владельцу): заменить OWNER/REPO на реальный путь репозитория.
         buildConfigField(
             "String",
             "GITHUB_RELEASES_URL",
-            "\"https://api.github.com/repos/OWNER/REPO/releases/latest\""
+            "\"https://api.github.com/repos/yalyoha/WhereAmI/releases/latest\""
         )
     }
 
