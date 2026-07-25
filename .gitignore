@@ -22,3 +22,7 @@ server/api/config.php
 /.playwright-mcp/
 /whereami-*.png
 
+# Локальные секреты (например, GITHUB_TOKEN для скриптов) — НЕ КОММИТИТЬ
+.env
+.env.local
+

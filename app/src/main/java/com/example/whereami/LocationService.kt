@@ -51,9 +51,16 @@ class LocationService : Service() {
 
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // FAST режим: велосипед/авто (speed >= SPEED_FAST_MPS) → шлём чаще, чтобы маркер
-    // не телепортировался по 300 м. На стоянии возвращаемся в SLOW (экономим батарею).
-    private var fastMode: Boolean = false
+    // Адаптивный интервал по расстоянию:
+    //   - штатный INTERVAL_DEFAULT_MS = 10 мин (стоим на месте),
+    //   - каждый апдейт с dist > MOVE_THRESHOLD_M ускоряем в 2 раза (пол-интервала),
+    //     пока не упрёмся в INTERVAL_MIN_MS = 1 сек,
+    //   - CALM_STREAK_TO_SLOW подряд «близких» апдейтов → замедляем в 2 раза,
+    //     пока не вернёмся к INTERVAL_DEFAULT_MS.
+    private var intervalMs: Long = INTERVAL_DEFAULT_MS
+    private var closeStreak: Int = 0
+    private var lastLat: Double? = null
+    private var lastLon: Double? = null
 
     // § ANDROID-TODO задача 2: проверяем обновления каждым 5-м апдейтом.
     // Отсчёт от старта сервиса — переживёт логаут/старт-стоп циклы,
@@ -63,7 +70,7 @@ class LocationService : Service() {
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
-            adjustRequestForSpeed(loc)
+            adjustIntervalForDistance(loc)
             scope.launch { handleLocation(loc) }
         }
     }
@@ -117,43 +124,59 @@ class LocationService : Service() {
     }
 
     private fun requestUpdates() {
-        applyRequest(fast = fastMode)
+        applyRequest(intervalMs)
     }
 
-    private fun applyRequest(fast: Boolean) {
-        val interval = if (fast) INTERVAL_FAST_MS else INTERVAL_MS
-        val fastest  = if (fast) FASTEST_FAST_MS  else FASTEST_MS
-        val maxDelay = if (fast) MAX_DELAY_FAST_MS else MAX_DELAY_MS
-        // На быстрой езде HIGH_ACCURACY: GPS чаще обновляет fix и реалистичнее считает скорость,
-        // что важно и для меток на карте, и для адаптивного режима. На покое — BALANCED, экономим батарею.
-        val priority = if (fast) Priority.PRIORITY_HIGH_ACCURACY
+    private fun applyRequest(interval: Long) {
+        // Ниже 30 сек — считаем, что клиент движется: включаем HIGH_ACCURACY.
+        // На больших интервалах BALANCED экономит батарею.
+        val priority = if (interval <= 30_000L) Priority.PRIORITY_HIGH_ACCURACY
                        else Priority.PRIORITY_BALANCED_POWER_ACCURACY
         val req = LocationRequest.Builder(interval)
-            .setMinUpdateIntervalMillis(fastest)
-            .setMaxUpdateDelayMillis(maxDelay)
+            .setMinUpdateIntervalMillis(interval)
+            .setMaxUpdateDelayMillis(interval)
             .setPriority(priority)
             .setWaitForAccurateLocation(false)
             .build()
         try {
             // requestLocationUpdates с тем же callback'ом просто перезапишет конфиг (не плодит подписки).
             fused.requestLocationUpdates(req, callback, Looper.getMainLooper())
-            Log.d(TAG, "locationRequest mode=${if (fast) "FAST" else "SLOW"} interval=${interval}ms")
+            Log.d(TAG, "locationRequest interval=${interval}ms priority=$priority")
         } catch (sec: SecurityException) {
             Log.w(TAG, "requestLocationUpdates: $sec")
             stopSelf()
         }
     }
 
-    private fun adjustRequestForSpeed(loc: Location) {
-        if (!loc.hasSpeed()) return  // нет данных о скорости — не меняем режим
-        val mps = loc.speed
-        val wantFast = when {
-            fastMode  -> mps >= SPEED_SLOW_MPS  // гистерезис: пока скорость не упала ниже 1.5 m/s, держим FAST
-            else      -> mps >= SPEED_FAST_MPS  // включаем FAST с 3 m/s (~11 км/ч)
+    /**
+     * Правит [intervalMs] по дистанции до предыдущей точки:
+     *   dist > MOVE_THRESHOLD_M                → halve, closeStreak = 0
+     *   dist ≤ MOVE_THRESHOLD_M                → closeStreak++;
+     *     если closeStreak ≥ CALM_STREAK_TO_SLOW → double, closeStreak = 0
+     * Границы: [INTERVAL_MIN_MS, INTERVAL_DEFAULT_MS].
+     */
+    private fun adjustIntervalForDistance(loc: Location) {
+        val prevLat = lastLat
+        val prevLon = lastLon
+        lastLat = loc.latitude
+        lastLon = loc.longitude
+        if (prevLat == null || prevLon == null) return   // первая точка, база
+
+        val dist = Haversine.distanceMeters(prevLat, prevLon, loc.latitude, loc.longitude)
+        val old = intervalMs
+        if (dist > MOVE_THRESHOLD_M) {
+            intervalMs = (intervalMs / 2).coerceAtLeast(INTERVAL_MIN_MS)
+            closeStreak = 0
+        } else {
+            closeStreak++
+            if (closeStreak >= CALM_STREAK_TO_SLOW) {
+                intervalMs = (intervalMs * 2).coerceAtMost(INTERVAL_DEFAULT_MS)
+                closeStreak = 0
+            }
         }
-        if (wantFast != fastMode) {
-            fastMode = wantFast
-            applyRequest(fast = fastMode)
+        if (intervalMs != old) {
+            Log.d(TAG, "interval ${old}ms → ${intervalMs}ms  (dist=${dist.toInt()}m, streak=$closeStreak)")
+            applyRequest(intervalMs)
         }
     }
 
@@ -311,21 +334,15 @@ class LocationService : Service() {
         private const val NOTIF_AUTH_ID  = 1002
         const val ACTION_STOP            = "com.example.whereami.STOP"
 
-        // ANDROID-TASK § 3.1 — SLOW режим: пешеход/стоянка, экономим батарею.
-        private const val INTERVAL_MS  = 60_000L
-        private const val FASTEST_MS   = 30_000L
-        private const val MAX_DELAY_MS = 60_000L
-
-        // FAST режим: велосипед/авто, чтобы маркер на карте не прыгал по 300+ м.
-        private const val INTERVAL_FAST_MS  = 15_000L
-        private const val FASTEST_FAST_MS   = 5_000L
-        private const val MAX_DELAY_FAST_MS = 20_000L
-
-        // Порог включения FAST режима — 3 м/с (~11 км/ч), нижняя граница велосипеда.
-        // Гистерезис: выключаем FAST только когда упали ниже 1.5 м/с, чтобы не дёргать
-        // подписку на каждой остановке на светофоре.
-        private const val SPEED_FAST_MPS = 3.0f
-        private const val SPEED_SLOW_MPS = 1.5f
+        // Адаптивный по дистанции интервал (см. adjustIntervalForDistance):
+        //   INTERVAL_DEFAULT_MS  — штатный, стоим на месте (10 мин).
+        //   INTERVAL_MIN_MS      — «в машине», максимум частоты (1 сек).
+        //   MOVE_THRESHOLD_M     — сдвиг больше этого = ускоряемся ×2.
+        //   CALM_STREAK_TO_SLOW  — столько подряд «близких» точек чтобы замедлиться ×2.
+        private const val INTERVAL_DEFAULT_MS  = 600_000L
+        private const val INTERVAL_MIN_MS      = 1_000L
+        private const val MOVE_THRESHOLD_M     = 20.0
+        private const val CALM_STREAK_TO_SLOW  = 10
 
         /** Проверять обновление каждый N-й POST-локации. § ANDROID-TODO 2. */
         private const val UPDATE_CHECK_EVERY_N = 5
