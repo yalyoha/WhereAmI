@@ -139,12 +139,12 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
             } catch (t: Throwable) {
                 // Например: vendor autostart Activity (Huawei) требует
                 // com.huawei.permission.external_app_settings.USE_COMPONENT
-                // — стороннее приложение его не имеет. Пропускаем этот шаг
-                // и идём дальше по визарду (batteryOpt мы уже прошли, значит
-                // остаётся только vendor — помечаем skipped и завершаем).
-                settings.lastError =
-                    "systemSettingsLauncher.launch(${next.component}): " +
-                    "${t.javaClass.simpleName}: ${t.message ?: "(no message)"}"
+                // — стороннее приложение его не имеет. Это ожидаемое
+                // ограничение платформы, не наша баг — не пугаем юзера
+                // диалогом, тихо логируем и идём к следующему шагу.
+                android.util.Log.w("SettingsFragment",
+                    "systemSettingsLauncher.launch(${next.component}) failed: " +
+                    "${t.javaClass.simpleName}: ${t.message}")
                 walker.markVendorAutostartSkipped()
                 advanceBackgroundWalk()   // рекурсивно идём к следующему шагу
             }
