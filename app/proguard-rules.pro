@@ -29,10 +29,6 @@
     <fields>;
 }
 
-# ─── Google Play Services Location (FusedLocationProviderClient) ───────────
--keep class com.google.android.gms.** { *; }
--dontwarn com.google.android.gms.**
-
 # ─── OkHttp / Okio ─────────────────────────────────────────────────────────
 -dontwarn okhttp3.**
 -dontwarn okio.**

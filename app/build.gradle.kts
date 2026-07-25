@@ -47,8 +47,8 @@ android {
         applicationId = "com.example.whereami"
         minSdk = 29
         targetSdk = 36
-        versionCode = 17
-        versionName = "4.4"
+        versionCode = 18
+        versionName = "4.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -115,7 +115,9 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.play.services.location)
+    // Google Play Services убраны: Huawei/HarmonyOS без GMS показывает странное
+    // поведение при наличии любых com.google.android.gms классов в APK.
+    // Используем системный android.location.LocationManager — работает везде.
     implementation(libs.okhttp)
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.work.runtime.ktx)

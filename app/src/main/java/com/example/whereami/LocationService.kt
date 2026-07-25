@@ -20,12 +20,6 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,29 +27,29 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Foreground location service — адаптивный интервал по дистанции,
- * два источника координат (Fused GMS → fallback system LocationManager).
+ * Foreground location service — адаптивный интервал по дистанции, работает
+ * ТОЛЬКО через системный android.location.LocationManager (без Google Play
+ * Services). Такое решение:
+ *   - работает на любых Android 10+ (Pixel, Samsung, Xiaomi, Huawei/HarmonyOS…),
+ *   - убирает риск, что Huawei-система «сворачивает» приложения из-за наличия
+ *     GMS-классов в APK,
+ *   - использует FUSED_PROVIDER (API 31+, system-side) когда доступен —
+ *     это по сути тот же fused что и в Play Services, но встроенный в AOSP.
  *
- * Интервал: см. adjustIntervalForDistance — от 1 сек (быстрое движение)
- * до 10 мин (стоим на месте), halves/doubles между.
+ * Интервал (см. adjustIntervalForDistance): от 1 сек (быстрое движение)
+ * до 10 мин (стоим). Halving при dist>20м, doubling при 10 подряд <20м.
  *
- * Источник:
- *   - Primary: FusedLocationProviderClient (Google Play Services).
- *   - Fallback: android.location.LocationManager — для Huawei EMUI/HarmonyOS
- *     без GMS, кастом-ROMов. Provider выбирается по интервалу:
- *     ≤30с → GPS, иначе FUSED_PROVIDER (API 31+) / NETWORK / GPS.
+ * Provider выбирается по интервалу:
+ *   ≤ 30 сек (движение) → GPS_PROVIDER (высокая точность);
+ *   иначе (стоянка)     → FUSED_PROVIDER / NETWORK / GPS в fallback.
  *
  * На каждую точку: читаем battery, POST в /api/location.
- * 200 ok / thinned → лог. 401 → стоп + notif. 400 → drop. 5xx/сеть → UploadQueue + RetryWorker.
+ * 200 ok / thinned → лог. 401 → стоп + notif. 400 → drop.
+ * 5xx / сеть → UploadQueue + RetryWorker.
  */
 class LocationService : Service() {
 
-    // Один из двух источников координат:
-    //   - Fused (GMS) — на телефонах с Google Play Services (Pixel, Samsung, Xiaomi, etc.)
-    //   - LocationManager (system) — fallback для Huawei EMUI/HarmonyOS без GMS, кастом-ROMов.
-    // Выбор делается в onCreate: сначала пробуем Fused, при ошибке — sysLm.
-    private var fused: FusedLocationProviderClient? = null
-    private var sysLm: LocationManager? = null
+    private var lm: LocationManager? = null
     private lateinit var settings: SettingsRepository
     private lateinit var queue: UploadQueue
     private lateinit var api: ApiClient
@@ -63,31 +57,16 @@ class LocationService : Service() {
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Адаптивный интервал по расстоянию:
-    //   - штатный INTERVAL_DEFAULT_MS = 10 мин (стоим на месте),
-    //   - каждый апдейт с dist > MOVE_THRESHOLD_M ускоряем в 2 раза (пол-интервала),
-    //     пока не упрёмся в INTERVAL_MIN_MS = 1 сек,
-    //   - CALM_STREAK_TO_SLOW подряд «близких» апдейтов → замедляем в 2 раза,
-    //     пока не вернёмся к INTERVAL_DEFAULT_MS.
     private var intervalMs: Long = INTERVAL_DEFAULT_MS
     private var closeStreak: Int = 0
     private var lastLat: Double? = null
     private var lastLon: Double? = null
 
     // § ANDROID-TODO задача 2: проверяем обновления каждым 5-м апдейтом.
-    // Отсчёт от старта сервиса — переживёт логаут/старт-стоп циклы,
-    // т. к. сервис пересоздаётся вместе со счётчиком.
     private var sendCounter: Int = 0
 
-    private val callback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            val loc = result.lastLocation ?: return
-            onNewFix(loc)
-        }
-    }
-
-    // Listener для системного LocationManager (fallback без GMS).
     // LocationListener — SAM (functional interface), достаточно onLocationChanged.
-    private val sysListener = LocationListener { loc -> onNewFix(loc) }
+    private val listener = LocationListener { loc -> onNewFix(loc) }
 
     private fun onNewFix(loc: Location) {
         adjustIntervalForDistance(loc)
@@ -96,16 +75,7 @@ class LocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        fused = try {
-            LocationServices.getFusedLocationProviderClient(this)
-        } catch (t: Throwable) {
-            Log.w(TAG, "GMS FusedLocationProviderClient unavailable: ${t.message}")
-            null
-        }
-        if (fused == null) {
-            sysLm = getSystemService(LOCATION_SERVICE) as? LocationManager
-            Log.i(TAG, "using system LocationManager fallback (GMS отсутствует)")
-        }
+        lm = getSystemService(LOCATION_SERVICE) as? LocationManager
         settings = SettingsRepository(this)
         queue    = UploadQueue(this)
         api      = ApiClient(settings.serverUrl)
@@ -119,10 +89,9 @@ class LocationService : Service() {
             return START_NOT_STICKY
         }
 
-        // Foreground заводим до запроса локации (требование Android 14+).
-        // На Android 14+ startForeground с типом LOCATION может выбросить
-        // ForegroundServiceStartNotAllowedException (например, если сервис
-        // стартовали из фона без активной Activity) — ловим, чтобы не крашить процесс.
+        // Foreground заводим до запроса локации. На Android 14+ startForeground
+        // с типом LOCATION может выбросить ForegroundServiceStartNotAllowedException
+        // (если стартовали из ограниченного контекста) — ловим.
         try {
             startInForeground(buildNotification(getString(R.string.notif_text_running)))
         } catch (t: Throwable) {
@@ -142,15 +111,15 @@ class LocationService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            if (fused == null && sysLm == null) {
-                Log.w(TAG, "Нет ни GMS-Fused, ни системного LocationManager — stopping")
+            if (lm == null) {
+                Log.w(TAG, "LocationManager недоступен — stopping")
                 stopSelf()
                 return START_NOT_STICKY
             }
 
             // API client пересоздаём — serverUrl мог поменяться в Settings.
             api = ApiClient(settings.serverUrl)
-            requestUpdates()
+            applyRequest(intervalMs)
             return START_STICKY
         } catch (t: Throwable) {
             saveError("onStartCommand", t)
@@ -178,59 +147,34 @@ class LocationService : Service() {
         startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
     }
 
-    private fun requestUpdates() {
-        applyRequest(intervalMs)
-    }
-
     private fun applyRequest(interval: Long) {
-        val client = fused
-        val lm = sysLm
+        val locationManager = lm ?: run {
+            saveError("applyRequest", IllegalStateException("LocationManager is null"))
+            stopSelf(); return
+        }
         try {
-            when {
-                client != null -> {
-                    // Ниже 30 сек — считаем, что клиент движется: включаем HIGH_ACCURACY.
-                    // На больших интервалах BALANCED экономит батарею.
-                    val priority = if (interval <= 30_000L) Priority.PRIORITY_HIGH_ACCURACY
-                                   else Priority.PRIORITY_BALANCED_POWER_ACCURACY
-                    val req = LocationRequest.Builder(interval)
-                        .setMinUpdateIntervalMillis(interval)
-                        .setMaxUpdateDelayMillis(interval)
-                        .setPriority(priority)
-                        .setWaitForAccurateLocation(false)
-                        .build()
-                    // requestLocationUpdates с тем же callback'ом просто перезапишет конфиг.
-                    client.requestLocationUpdates(req, callback, Looper.getMainLooper())
-                    Log.d(TAG, "Fused interval=${interval}ms priority=$priority")
-                }
-                lm != null -> {
-                    // Системный LocationManager: провайдер выбираем по «активности» клиента.
-                    // Интервал ≤ 30 сек = движение → GPS_PROVIDER (высокая точность).
-                    // Иначе — FUSED_PROVIDER (system-side, API 31+) или GPS в fallback.
-                    val provider = when {
-                        interval <= 30_000L -> LocationManager.GPS_PROVIDER
-                        Build.VERSION.SDK_INT >= 31 &&
-                            lm.getProviders(true).contains(LocationManager.FUSED_PROVIDER)
-                            -> LocationManager.FUSED_PROVIDER
-                        lm.getProviders(true).contains(LocationManager.NETWORK_PROVIDER)
-                            -> LocationManager.NETWORK_PROVIDER
-                        else -> LocationManager.GPS_PROVIDER
-                    }
-                    // Пере-подписка: сначала снимаем прежнюю, потом ставим новую с новым интервалом.
-                    lm.removeUpdates(sysListener)
-                    lm.requestLocationUpdates(
-                        provider,
-                        interval,      // minTime — приблизительный интервал между fix'ами
-                        0f,            // minDistance — 0, наша адаптивная логика решает сама
-                        sysListener,
-                        Looper.getMainLooper()
-                    )
-                    Log.d(TAG, "SysLocationManager interval=${interval}ms provider=$provider")
-                }
-                else -> {
-                    Log.w(TAG, "applyRequest: нет источника локации — stop")
-                    stopSelf()
-                }
+            // Provider выбираем по «активности» клиента:
+            //   interval ≤ 30 сек → движение → GPS_PROVIDER (нужна точность);
+            //   иначе               → FUSED_PROVIDER (API 31+, system-side) / NETWORK / GPS.
+            val provider = when {
+                interval <= 30_000L -> LocationManager.GPS_PROVIDER
+                Build.VERSION.SDK_INT >= 31 &&
+                    locationManager.getProviders(true).contains(LocationManager.FUSED_PROVIDER)
+                    -> LocationManager.FUSED_PROVIDER
+                locationManager.getProviders(true).contains(LocationManager.NETWORK_PROVIDER)
+                    -> LocationManager.NETWORK_PROVIDER
+                else -> LocationManager.GPS_PROVIDER
             }
+            // Пере-подписка: сначала снимаем прежнюю, потом ставим новую с новым интервалом.
+            locationManager.removeUpdates(listener)
+            locationManager.requestLocationUpdates(
+                provider,
+                interval,      // minTime — приблизительный интервал между fix'ами
+                0f,            // minDistance — 0, наша адаптивная логика решает сама
+                listener,
+                Looper.getMainLooper()
+            )
+            Log.d(TAG, "requestLocationUpdates interval=${interval}ms provider=$provider")
         } catch (t: Throwable) {
             saveError("requestLocationUpdates", t)
             stopSelf()
@@ -325,8 +269,7 @@ class LocationService : Service() {
     }
 
     private fun stopAll() {
-        try { fused?.removeLocationUpdates(callback) } catch (_: Throwable) {}
-        try { sysLm?.removeUpdates(sysListener) } catch (_: Throwable) {}
+        try { lm?.removeUpdates(listener) } catch (_: Throwable) {}
     }
     private fun stopAllAndStop() {
         stopAll()
@@ -425,10 +368,6 @@ class LocationService : Service() {
         const val ACTION_STOP            = "com.example.whereami.STOP"
 
         // Адаптивный по дистанции интервал (см. adjustIntervalForDistance):
-        //   INTERVAL_DEFAULT_MS  — штатный, стоим на месте (10 мин).
-        //   INTERVAL_MIN_MS      — «в машине», максимум частоты (1 сек).
-        //   MOVE_THRESHOLD_M     — сдвиг больше этого = ускоряемся ×2.
-        //   CALM_STREAK_TO_SLOW  — столько подряд «близких» точек чтобы замедлиться ×2.
         private const val INTERVAL_DEFAULT_MS  = 600_000L
         private const val INTERVAL_MIN_MS      = 1_000L
         private const val MOVE_THRESHOLD_M     = 20.0
@@ -439,8 +378,6 @@ class LocationService : Service() {
 
         fun start(context: Context) {
             val i = Intent(context, LocationService::class.java)
-            // На Android 12+ startForegroundService из ограниченного контекста
-            // может бросить ForegroundServiceStartNotAllowedException — не крашим caller'а.
             try {
                 ContextCompat.startForegroundService(context, i)
             } catch (t: Throwable) {
