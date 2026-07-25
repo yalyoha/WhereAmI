@@ -44,7 +44,7 @@
     <string name="tab_map">Карта</string>
     <string name="tab_path">Путь</string>
     <string name="tab_info">Инфо</string>
-    <string name="tab_logout">Выход</string>
+    <string name="tab_settings">Настройки</string>
 
     <!-- Periods -->
     <string name="period_today">Сегодня</string>
@@ -59,6 +59,7 @@
     <string name="info_points">Точек в треке: %1$d</string>
     <string name="info_first_last">С %1$s до %2$s</string>
     <string name="info_error">Не удалось загрузить: %1$s</string>
+    <string name="settings_version">v%1$s · build %2$d</string>
 
     <!-- Logout dialog -->
     <string name="logout_confirm_title">Выйти?</string>

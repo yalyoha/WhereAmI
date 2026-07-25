@@ -92,7 +92,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_map -> { showFragment(MapFragment(), "map"); true }
                 R.id.nav_path -> { showFragment(PathFragment(), "path"); true }
                 R.id.nav_info -> { showFragment(InfoFragment(), "info"); true }
-                R.id.nav_logout -> { confirmLogout(); false /* не переключаемся */ }
+                R.id.nav_settings -> { showFragment(SettingsFragment(), "settings"); true }
                 else -> false
             }
         }
@@ -122,7 +122,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- Logout ----------
-    private fun confirmLogout() {
+    /** Открыто для [SettingsFragment] — там теперь живёт ссылка «Выйти». */
+    fun confirmLogout() {
         AlertDialog.Builder(this)
             .setTitle(R.string.logout_confirm_title)
             .setMessage(R.string.logout_confirm_message)
