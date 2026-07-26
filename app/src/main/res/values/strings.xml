@@ -39,6 +39,8 @@
     <string name="batt_opt_message">Android может приостанавливать фоновые приложения и обрывать передачу координат. В следующем диалоге выбери «Разрешить», чтобы WhereAmI работал без перерыва.</string>
     <string name="batt_opt_open">Открыть</string>
     <string name="batt_opt_skip">Не сейчас</string>
+    <string name="batt_opt_status_ok">Батарея: работать без ограничений ✅</string>
+    <string name="batt_opt_status_bad">Батарея: экономия включена ⚠️ · нажми, чтобы отключить</string>
 
     <!-- Bottom navigation -->
     <string name="tab_map">Карта</string>

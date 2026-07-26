@@ -34,10 +34,15 @@ class SettingsRepository(context: Context) {
         get() = prefs.getBoolean(KEY_SHARE, false)
         set(v) = prefs.edit().putBoolean(KEY_SHARE, v).apply()
 
-    /** Один раз показали диалог «исключи из батарейной оптимизации» — не доставать пользователя повторно. */
-    var batteryOptAsked: Boolean
-        get() = prefs.getBoolean(KEY_BATT_OPT_ASKED, false)
-        set(v) = prefs.edit().putBoolean(KEY_BATT_OPT_ASKED, v).apply()
+    /**
+     * Таймстамп последнего показа диалога «исключи из батарейной оптимизации» (мс с эпохи).
+     * Диалог перепоказываем не чаще раза в 24 часа — иначе OEM battery saver, включённый
+     * снова после апдейта / после отказа юзера, никак не заметится и мы будем молча
+     * умирать в фоне. Одноразовый флаг (как было раньше) — anti-pattern для этой ситуации.
+     */
+    var batteryOptPromptedAt: Long
+        get() = prefs.getLong(KEY_BATT_OPT_PROMPTED_AT, 0L)
+        set(v) = prefs.edit().putLong(KEY_BATT_OPT_PROMPTED_AT, v).apply()
 
     /** Пользователь явно включил режим «работать в фоне» и прошёл визард системных настроек. */
     var keepInBackground: Boolean
@@ -88,7 +93,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_TOKEN            = "bearer_token"
         private const val KEY_MY_SLUG          = "my_slug"
         private const val KEY_SHARE            = "sharing_enabled"
-        private const val KEY_BATT_OPT_ASKED   = "batt_opt_asked"
+        private const val KEY_BATT_OPT_PROMPTED_AT = "batt_opt_prompted_at"
         private const val KEY_KEEP_BG          = "keep_in_background"
         private const val KEY_LAST_ERROR       = "last_error"
     }

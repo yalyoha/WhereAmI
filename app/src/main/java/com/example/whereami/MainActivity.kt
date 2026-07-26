@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         checkPendingUpdate()
         showLastErrorIfAny()
+        maybeAskBatteryOptimization()
     }
 
     private fun showLastErrorIfAny() {
@@ -202,10 +203,14 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("BatteryLife")
     private fun maybeAskBatteryOptimization() {
-        if (settings.batteryOptAsked) return
+        // Показываем только если sharing включён (иначе юзеру плевать на background),
+        // не чаще раза в 24 часа, и только если OS реально ещё нас душит.
+        if (!settings.sharingEnabled) return
         val pm = getSystemService(PowerManager::class.java) ?: return
         if (pm.isIgnoringBatteryOptimizations(packageName)) return
-        settings.batteryOptAsked = true
+        val now = System.currentTimeMillis()
+        if (now - settings.batteryOptPromptedAt < BATT_OPT_REPROMPT_MS) return
+        settings.batteryOptPromptedAt = now
         AlertDialog.Builder(this)
             .setTitle(R.string.batt_opt_title)
             .setMessage(R.string.batt_opt_message)
@@ -223,6 +228,12 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(R.string.batt_opt_skip, null)
             .show()
+    }
+
+    private companion object {
+        // Не чаще раза в 24 часа перезадаём вопрос про battery-opt. Меньше — навязчиво,
+        // больше — юзер, случайно нажавший "Отмена", молча живёт в задушенном режиме.
+        const val BATT_OPT_REPROMPT_MS = 24L * 60L * 60L * 1000L
     }
 
     private fun hasLocationPermission(): Boolean =

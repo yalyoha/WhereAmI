@@ -27,7 +27,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Foreground location service — адаптивный интервал по дистанции, работает
+ * Foreground location service — фиксированный интервал 60 сек, работает
  * ТОЛЬКО через системный android.location.LocationManager (без Google Play
  * Services). Такое решение:
  *   - работает на любых Android 10+ (Pixel, Samsung, Xiaomi, Huawei/HarmonyOS…),
@@ -36,12 +36,16 @@ import kotlinx.coroutines.launch
  *   - использует FUSED_PROVIDER (API 31+, system-side) когда доступен —
  *     это по сути тот же fused что и в Play Services, но встроенный в AOSP.
  *
- * Интервал (см. adjustIntervalForDistance): от 1 сек (быстрое движение)
- * до 10 мин (стоим). Halving при dist>20м, doubling при 10 подряд <20м.
+ * Почему фиксированный 60 сек, а не адаптив:
+ *   - сервер считает клиента offline через 180 сек молчания;
+ *   - 60 сек гарантированно покрывает online-порог с трёхкратным запасом;
+ *   - сервер сам прореживает дубликаты (thinned) — экономия трафика на его стороне;
+ *   - адаптив 1сек↔10мин раньше уводил интервал за 180 сек при простое, и
+ *     клиент "исчезал" с карты партнёра, даже пока FGS был жив.
  *
- * Provider выбирается по интервалу:
- *   ≤ 30 сек (движение) → GPS_PROVIDER (высокая точность);
- *   иначе (стоянка)     → FUSED_PROVIDER / NETWORK / GPS в fallback.
+ * Provider — FUSED (API 31+) если доступен, иначе NETWORK, иначе GPS.
+ * FUSED делает sensor-fusion внутри AOSP и выдаёт точки без активного GPS —
+ * заметно экономит батарею на минутном интервале по сравнению с чистым GPS.
  *
  * На каждую точку: читаем battery, POST в /api/location.
  * 200 ok / thinned → лог. 401 → стоп + notif. 400 → drop.
@@ -56,26 +60,11 @@ class LocationService : Service() {
 
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Адаптивный интервал по расстоянию.
-    // Стартуем с BOOTSTRAP (1 сек) — чтобы первый fix пришёл быстро и
-    // клиент сразу появился online на веб-карте. Дальше adaptive
-    // логика поднимает интервал вплоть до INTERVAL_DEFAULT_MS (10 мин)
-    // если клиент стоит на месте.
-    private var intervalMs: Long = INTERVAL_MIN_MS
-    private var closeStreak: Int = 0
-    private var lastLat: Double? = null
-    private var lastLon: Double? = null
-
     // § ANDROID-TODO задача 2: проверяем обновления каждым 5-м апдейтом.
     private var sendCounter: Int = 0
 
     // LocationListener — SAM (functional interface), достаточно onLocationChanged.
-    private val listener = LocationListener { loc -> onNewFix(loc) }
-
-    private fun onNewFix(loc: Location) {
-        adjustIntervalForDistance(loc)
-        scope.launch { handleLocation(loc) }
-    }
+    private val listener = LocationListener { loc -> scope.launch { handleLocation(loc) } }
 
     override fun onCreate() {
         super.onCreate()
@@ -123,7 +112,7 @@ class LocationService : Service() {
 
             // API client пересоздаём — serverUrl мог поменяться в Settings.
             api = ApiClient(settings.serverUrl)
-            applyRequest(intervalMs)
+            applyRequest()
             return START_STICKY
         } catch (t: Throwable) {
             saveError("onStartCommand", t)
@@ -151,17 +140,16 @@ class LocationService : Service() {
         startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
     }
 
-    private fun applyRequest(interval: Long) {
+    private fun applyRequest() {
         val locationManager = lm ?: run {
             saveError("applyRequest", IllegalStateException("LocationManager is null"))
             stopSelf(); return
         }
         try {
-            // Provider выбираем по «активности» клиента:
-            //   interval ≤ 30 сек → движение → GPS_PROVIDER (нужна точность);
-            //   иначе               → FUSED_PROVIDER (API 31+, system-side) / NETWORK / GPS.
+            // FUSED (API 31+, system-side) → NETWORK → GPS fallback.
+            // FUSED делает sensor-fusion внутри AOSP: одинаково хорошо в помещении
+            // (по WiFi/сотам) и на улице (по GPS), без активного удержания GPS-приёмника.
             val provider = when {
-                interval <= 30_000L -> LocationManager.GPS_PROVIDER
                 Build.VERSION.SDK_INT >= 31 &&
                     locationManager.getProviders(true).contains(LocationManager.FUSED_PROVIDER)
                     -> LocationManager.FUSED_PROVIDER
@@ -169,51 +157,18 @@ class LocationService : Service() {
                     -> LocationManager.NETWORK_PROVIDER
                 else -> LocationManager.GPS_PROVIDER
             }
-            // Пере-подписка: сначала снимаем прежнюю, потом ставим новую с новым интервалом.
             locationManager.removeUpdates(listener)
             locationManager.requestLocationUpdates(
                 provider,
-                interval,      // minTime — приблизительный интервал между fix'ами
-                0f,            // minDistance — 0, наша адаптивная логика решает сама
+                INTERVAL_MS,   // minTime — 60 сек
+                0f,            // minDistance — 0, интервал определяет частоту
                 listener,
                 Looper.getMainLooper()
             )
-            Log.d(TAG, "requestLocationUpdates interval=${interval}ms provider=$provider")
+            Log.d(TAG, "requestLocationUpdates interval=${INTERVAL_MS}ms provider=$provider")
         } catch (t: Throwable) {
             saveError("requestLocationUpdates", t)
             stopSelf()
-        }
-    }
-
-    /**
-     * Правит [intervalMs] по дистанции до предыдущей точки:
-     *   dist > MOVE_THRESHOLD_M                → halve, closeStreak = 0
-     *   dist ≤ MOVE_THRESHOLD_M                → closeStreak++;
-     *     если closeStreak ≥ CALM_STREAK_TO_SLOW → double, closeStreak = 0
-     * Границы: [INTERVAL_MIN_MS, INTERVAL_DEFAULT_MS].
-     */
-    private fun adjustIntervalForDistance(loc: Location) {
-        val prevLat = lastLat
-        val prevLon = lastLon
-        lastLat = loc.latitude
-        lastLon = loc.longitude
-        if (prevLat == null || prevLon == null) return   // первая точка, база
-
-        val dist = Haversine.distanceMeters(prevLat, prevLon, loc.latitude, loc.longitude)
-        val old = intervalMs
-        if (dist > MOVE_THRESHOLD_M) {
-            intervalMs = (intervalMs / 2).coerceAtLeast(INTERVAL_MIN_MS)
-            closeStreak = 0
-        } else {
-            closeStreak++
-            if (closeStreak >= CALM_STREAK_TO_SLOW) {
-                intervalMs = (intervalMs * 2).coerceAtMost(INTERVAL_DEFAULT_MS)
-                closeStreak = 0
-            }
-        }
-        if (intervalMs != old) {
-            Log.d(TAG, "interval ${old}ms → ${intervalMs}ms  (dist=${dist.toInt()}m, streak=$closeStreak)")
-            applyRequest(intervalMs)
         }
     }
 
@@ -292,14 +247,15 @@ class LocationService : Service() {
             nm.createNotificationChannel(NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.notif_channel_name),
-                NotificationManager.IMPORTANCE_MIN  // без иконки в статусбаре, без звука/вибро,
-                                                    // видно только когда полностью раскрыл шторку
+                NotificationManager.IMPORTANCE_LOW  // иконка в статусбаре видна, но без звука/вибро.
+                                                    // MIN нельзя: OEM'ы (Xiaomi/Huawei) убивают FGS
+                                                    // с MIN-каналом заметно охотнее.
             ).apply {
                 setShowBadge(false)
                 setSound(null, null)
                 enableVibration(false)
                 enableLights(false)
-                description = "Фоновая передача координат — без звука и в свёрнутом виде"
+                description = "Фоновая передача координат — иконка в статусбаре, без звука"
             })
         }
         if (nm.getNotificationChannel(CHANNEL_AUTH_ID) == null) {
@@ -362,20 +318,20 @@ class LocationService : Service() {
 
     companion object {
         private const val TAG            = "LocationService"
-        // _v2 — чтобы Android создал свежий канал с IMPORTANCE_MIN. Каналы immutable
-        // после createNotificationChannel(), у уже установленного приложения старый
-        // канал с IMPORTANCE_LOW остался бы, поэтому меняем ID.
-        private const val CHANNEL_ID     = "whereami_location_v2"
+        // _v3 — каналы immutable после createNotificationChannel(), новый ID
+        // нужен чтобы Android создал канал с IMPORTANCE_LOW (было _v2 с MIN).
+        // Причина смены: IMPORTANCE_MIN сигналит OEM battery managers'ам
+        // "работа не user-visible" — Xiaomi/Huawei такие FGS убивают агрессивнее.
+        // LOW = тихо (без звука/вибро), но иконка в статусбаре видна.
+        private const val CHANNEL_ID     = "whereami_location_v3"
         private const val CHANNEL_AUTH_ID= "whereami_auth"
         private const val NOTIF_ID       = 1001
         private const val NOTIF_AUTH_ID  = 1002
         const val ACTION_STOP            = "com.example.whereami.STOP"
 
-        // Адаптивный по дистанции интервал (см. adjustIntervalForDistance):
-        private const val INTERVAL_DEFAULT_MS  = 600_000L
-        private const val INTERVAL_MIN_MS      = 1_000L
-        private const val MOVE_THRESHOLD_M     = 20.0
-        private const val CALM_STREAK_TO_SLOW  = 10
+        // Фиксированный интервал 60 сек. Сервер считает клиента offline через 180 сек —
+        // 60 покрывает трёхкратным запасом. Сервер сам прореживает (thinned).
+        private const val INTERVAL_MS = 60_000L
 
         /** Проверять обновление каждый N-й POST-локации. § ANDROID-TODO 2. */
         private const val UPDATE_CHECK_EVERY_N = 5

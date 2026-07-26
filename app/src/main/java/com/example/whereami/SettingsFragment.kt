@@ -1,8 +1,12 @@
 package com.example.whereami
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Paint
+import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
@@ -26,6 +30,7 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
     private lateinit var settings: SettingsRepository
     private lateinit var walker: BackgroundReliabilityWalker
     private lateinit var keepBgSwitch: MaterialSwitch
+    private lateinit var battOptStatus: TextView
 
     private val bgLocationLauncher: ActivityResultLauncher<String> =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -39,6 +44,40 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
             advanceBackgroundWalk()
         }
 
+    override fun onResume() {
+        super.onResume()
+        // Юзер мог только что вернуться с системного экрана и включить/выключить экономию —
+        // строку статуса обновляем при каждом входе на вкладку.
+        if (::battOptStatus.isInitialized) refreshBattOptStatus()
+    }
+
+    private fun refreshBattOptStatus() {
+        val pm = requireContext().getSystemService(PowerManager::class.java)
+        val ok = pm?.isIgnoringBatteryOptimizations(requireContext().packageName) == true
+        battOptStatus.text = getString(
+            if (ok) R.string.batt_opt_status_ok else R.string.batt_opt_status_bad
+        )
+        // Кликабельно только в "плохом" состоянии — незачем ронять юзера на системный экран,
+        // если и так уже разрешено.
+        battOptStatus.isClickable = !ok
+        battOptStatus.isFocusable = !ok
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun openBatteryOptSettings() {
+        val pkg = requireContext().packageName
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(Uri.parse("package:$pkg"))
+            )
+        }.onFailure {
+            runCatching {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
+        }
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         settings = SettingsRepository(requireContext())
@@ -50,6 +89,10 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
             if (isChecked) startBackgroundWalk()
             else settings.keepInBackground = false
         }
+
+        battOptStatus = view.findViewById(R.id.settings_batt_opt_status)
+        battOptStatus.setOnClickListener { openBatteryOptSettings() }
+        refreshBattOptStatus()
 
         view.findViewById<TextView>(R.id.settings_installed).text =
             getString(R.string.settings_installed, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)

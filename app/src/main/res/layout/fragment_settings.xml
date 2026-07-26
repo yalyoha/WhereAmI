@@ -22,10 +22,21 @@
         android:id="@+id/settings_keep_bg_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
         android:textAppearance="?attr/textAppearanceBodySmall"
         android:textColor="@color/brand_on_gradient"
         android:text="@string/keep_bg_hint" />
+
+    <TextView
+        android:id="@+id/settings_batt_opt_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="16dp"
+        android:padding="8dp"
+        android:background="?attr/selectableItemBackground"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="@color/brand_on_gradient"
+        tools:text="Батарея: работать без ограничений ✅" />
 
     <Space
         android:layout_width="match_parent"
