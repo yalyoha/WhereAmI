@@ -54,6 +54,12 @@
             android:name=".MainActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".LogActivity"
+            android:exported="false"
+            android:label="@string/log_title"
+            android:parentActivityName=".MainActivity" />
+
         <service
             android:name=".LocationService"
             android:enabled="true"

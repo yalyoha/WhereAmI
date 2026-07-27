@@ -36,7 +36,7 @@ class RetryWorker(
 
         val token = settings.token
         if (token.length != 32 || settings.mySlug.isEmpty()) {
-            Log.i(TAG, "skip: не сконфигурирован токен/slug")
+            FileLogger.i(TAG, "skip: не сконфигурирован токен/slug")
             return@withContext Result.success()
         }
 
@@ -47,7 +47,7 @@ class RetryWorker(
         val batch = queue.peekBatch(UploadQueue.DRAIN_BATCH_SIZE)
         if (batch.isEmpty()) return@withContext Result.success()
 
-        Log.i(TAG, "drain start: ${batch.size} в очереди")
+        FileLogger.i(TAG, "drain start: ${batch.size} в очереди")
 
         for (item in batch) {
             when (val res = api.update(token, item)) {
@@ -55,9 +55,9 @@ class RetryWorker(
                 is ApiClient.Result.Err -> {
                     when (res.code) {
                         401 -> { stopOnAuth = true; break }
-                        400 -> { Log.w(TAG, "drop bad payload: ${res.message}"); processed++ }
+                        400 -> { FileLogger.w(TAG, "drop bad payload: ${res.message}"); processed++ }
                         else -> {
-                            Log.w(TAG, "drain stop: ${res.code} ${res.message}")
+                            FileLogger.w(TAG, "drain stop: ${res.code} ${res.message}")
                             break // 5xx или сеть — оставляем хвост на следующий период
                         }
                     }
@@ -66,7 +66,7 @@ class RetryWorker(
         }
 
         if (processed > 0) queue.removeFirst(processed)
-        Log.i(TAG, "drain end: отправлено $processed, осталось ${queue.size()}")
+        FileLogger.i(TAG, "drain end: отправлено $processed, осталось ${queue.size()}")
 
         if (stopOnAuth) {
             // Не Result.retry() — иначе будет крутиться вхолостую с битым токеном.

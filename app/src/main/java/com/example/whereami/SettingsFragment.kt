@@ -107,6 +107,12 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         logoutLink.setOnClickListener {
             (requireActivity() as MainActivity).confirmLogout()
         }
+
+        val openLog = view.findViewById<TextView>(R.id.settings_open_log)
+        openLog.paintFlags = openLog.paintFlags or Paint.UNDERLINE_TEXT_FLAG
+        openLog.setOnClickListener {
+            startActivity(Intent(requireContext(), LogActivity::class.java))
+        }
     }
 
     /**

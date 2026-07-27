@@ -80,4 +80,14 @@
     <string name="keep_bg_walkthrough_title">Настройка фона</string>
     <string name="keep_bg_walkthrough_msg">Сейчас откроются системные настройки: разреши WhereAmI работать без ограничений энергосбережения и в автозапуске. Приложение вернётся сюда после каждого шага.</string>
     <string name="keep_bg_need_bg_location">Нужно разрешение «Всегда» для локации</string>
+
+    <!-- Log viewer -->
+    <string name="settings_open_log">Полный лог фона</string>
+    <string name="log_title">WhereAmI: лог</string>
+    <string name="log_refresh">Обновить</string>
+    <string name="log_copy">Скопировать всё</string>
+    <string name="log_share">Поделиться</string>
+    <string name="log_clear">Очистить</string>
+    <string name="log_clear_confirm">Стереть содержимое лога? Восстановить нельзя.</string>
+    <string name="log_copied">Лог скопирован в буфер обмена</string>
 </resources>

@@ -10,7 +10,10 @@ class WhereamiApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        installCrashHandler()  // самое первое — чтобы поймать всё, что дальше
+        FileLogger.init(this)  // до installCrashHandler — чтобы UEH тоже мог писать в файл
+        FileLogger.i("WhereamiApp", "onCreate pid=${android.os.Process.myPid()} " +
+                "version=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})")
+        installCrashHandler()
         try {
             RetryWorker.schedulePeriodic(this)
             // Периодическая проверка обновлений больше не нужна: LocationService
@@ -51,6 +54,7 @@ class WhereamiApp : Application() {
         val trace = sw.toString().take(4000)
         val msg = "$where: ${t.javaClass.simpleName}: ${t.message ?: "(no message)"}\n\n$trace"
         Log.e("WhereamiApp", msg)
+        FileLogger.e("WhereamiApp", "CRASH $where", t)
         try {
             SettingsRepository(this).lastError = msg
         } catch (_: Throwable) { /* best effort */ }
