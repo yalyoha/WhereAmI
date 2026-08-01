@@ -15,6 +15,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
@@ -43,9 +44,18 @@ import kotlinx.coroutines.launch
  *   - адаптив 1сек↔10мин раньше уводил интервал за 180 сек при простое, и
  *     клиент "исчезал" с карты партнёра, даже пока FGS был жив.
  *
- * Provider — FUSED (API 31+) если доступен, иначе NETWORK, иначе GPS.
- * FUSED делает sensor-fusion внутри AOSP и выдаёт точки без активного GPS —
- * заметно экономит батарею на минутном интервале по сравнению с чистым GPS.
+ * Providers — подписываемся на ВСЕ доступные одновременно (FUSED + GPS + NETWORK,
+ * сколько система показывает как enabled). На Huawei/HarmonyOS FUSED_PROVIDER часто
+ * молча не отдаёт callback'ов (без GMS реализация своя); дублирование покрывает такой
+ * тихий провайдер. Сервер дедуплицирует через thinning, лишний трафик — единицы байт/мин.
+ *
+ * Startup UX «открыл приложение → маркер сразу двигается»:
+ *   (1) seed: закешированный getLastKnownLocation свежее 5 мин — уходит в POST сразу;
+ *   (2) bootstrap: одноразовый getCurrentLocation (API 30+) на каждый провайдер параллельно —
+ *       не ждём 60-секундного интервала подписки для первого fix'а;
+ *   (3) обычная подписка каждые 60 сек;
+ *   (4) watchdog каждые 5 мин: если тишина > 6 мин — перекатываем всё, чтобы вылезти
+ *       из состояния «FGS жив, но провайдер молчит».
  *
  * На каждую точку: читаем battery, POST в /api/location.
  * 200 ok / thinned → лог. 401 → стоп + notif. 400 → drop.
@@ -62,6 +72,31 @@ class LocationService : Service() {
 
     // § ANDROID-TODO задача 2: проверяем обновления каждым 5-м апдейтом.
     private var sendCounter: Int = 0
+
+    // Watchdog / стабильность:
+    //   lastHandledAtMs — время последнего handleLocation(), обновляется в handleLocation.
+    //   startedAtMs     — момент последнего applyRequest(), точка отсчёта для «тишины с рождения».
+    //   subscribedProviders — на каких провайдерах активна подписка (для лога).
+    // Watchdog каждые 5 мин проверяет, что что-то приходит; если тишина > 6 мин —
+    // перекатывает подписку и заново дёргает getCurrentLocation. Это спасает от тихо
+    // умершего провайдера (частый сценарий на Huawei/HarmonyOS: FUSED_PROVIDER числится
+    // enabled, но callback'ов не даёт).
+    @Volatile private var lastHandledAtMs: Long = 0L
+    @Volatile private var startedAtMs: Long = 0L
+    private val subscribedProviders = mutableListOf<String>()
+    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
+    private val watchdog = object : Runnable {
+        override fun run() {
+            val now = System.currentTimeMillis()
+            val silentMs = if (lastHandledAtMs == 0L) (now - startedAtMs) else (now - lastHandledAtMs)
+            if (silentMs > WATCHDOG_STALE_MS) {
+                FileLogger.w(TAG, "watchdog: no fix for ${silentMs / 1000}s " +
+                        "(subscribed=$subscribedProviders) → re-apply request")
+                applyRequest()
+            }
+            mainHandler.postDelayed(this, WATCHDOG_PERIOD_MS)
+        }
+    }
 
     // LocationListener — SAM (functional interface), достаточно onLocationChanged.
     private val listener = LocationListener { loc -> scope.launch { handleLocation(loc) } }
@@ -173,33 +208,112 @@ class LocationService : Service() {
             stopSelf(); return
         }
         try {
-            // FUSED (API 31+, system-side) → NETWORK → GPS fallback.
-            // FUSED делает sensor-fusion внутри AOSP: одинаково хорошо в помещении
-            // (по WiFi/сотам) и на улице (по GPS), без активного удержания GPS-приёмника.
-            val provider = when {
-                Build.VERSION.SDK_INT >= 31 &&
-                    locationManager.getProviders(true).contains(LocationManager.FUSED_PROVIDER)
-                    -> LocationManager.FUSED_PROVIDER
-                locationManager.getProviders(true).contains(LocationManager.NETWORK_PROVIDER)
-                    -> LocationManager.NETWORK_PROVIDER
-                else -> LocationManager.GPS_PROVIDER
+            val enabled = try { locationManager.getProviders(true) } catch (_: Throwable) { emptyList() }
+            FileLogger.i(TAG, "providers enabled=$enabled")
+
+            // Подписываемся на ВСЕ доступные провайдеры одновременно (FUSED + GPS + NETWORK,
+            // сколько система отдаёт как enabled). Причина — на Huawei/HarmonyOS FUSED_PROVIDER
+            // часто числится enabled, но callback'ов не отдаёт молча (у Huawei своя реализация,
+            // без GMS). Дублирование покрывает молчащий провайдер; сервер дедуплицирует
+            // по thinning'у, лишний трафик — единицы байт на минуту.
+            val subs = mutableListOf<String>()
+            if (Build.VERSION.SDK_INT >= 31 && enabled.contains(LocationManager.FUSED_PROVIDER))
+                subs += LocationManager.FUSED_PROVIDER
+            if (enabled.contains(LocationManager.GPS_PROVIDER))
+                subs += LocationManager.GPS_PROVIDER
+            if (enabled.contains(LocationManager.NETWORK_PROVIDER))
+                subs += LocationManager.NETWORK_PROVIDER
+
+            if (subs.isEmpty()) {
+                saveError("applyRequest", IllegalStateException("нет включённых провайдеров локации"))
+                stopSelf(); return
             }
-            locationManager.removeUpdates(listener)
-            locationManager.requestLocationUpdates(
-                provider,
-                INTERVAL_MS,   // minTime — 60 сек
-                0f,            // minDistance — 0, интервал определяет частоту
-                listener,
-                Looper.getMainLooper()
-            )
-            FileLogger.i(TAG, "requestLocationUpdates interval=${INTERVAL_MS}ms provider=$provider")
+
+            // Снимаем прошлые подписки перед перерегистрацией (актуально для watchdog re-apply).
+            try { locationManager.removeUpdates(listener) } catch (_: Throwable) {}
+            subscribedProviders.clear()
+
+            // (1) Мгновенный seed: закешированный last-known с любого провайдера, если свежий.
+            //     Это делает UX «открыл приложение → маркер сразу двигается» реальным
+            //     (иначе первого fix'а ждём до 60 сек + время холодного старта GPS).
+            var freshest: Location? = null
+            for (p in subs) {
+                val cached = try { locationManager.getLastKnownLocation(p) } catch (_: SecurityException) { null }
+                if (cached != null && (freshest == null || cached.time > freshest.time)) freshest = cached
+            }
+            val nowMs = System.currentTimeMillis()
+            if (freshest != null && nowMs - freshest.time in 0..LAST_KNOWN_MAX_AGE_MS) {
+                FileLogger.i(TAG, "seed cached last-known age=${(nowMs - freshest.time) / 1000}s " +
+                        "provider=${freshest.provider}")
+                scope.launch { handleLocation(freshest) }
+            }
+
+            // (2) Bootstrap: разовый свежий fix через getCurrentLocation (API 30+),
+            //     без ожидания 60-секундного интервала подписки. Быстрый ответ для NETWORK,
+            //     точный для GPS. Отдаём оба — первый пришедший увидит и thinned сервер отобьёт.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                requestSingleShot(locationManager, subs)
+            }
+
+            // (3) Основная подписка на каждый провайдер, 60 сек.
+            for (p in subs) {
+                try {
+                    locationManager.requestLocationUpdates(
+                        p,
+                        INTERVAL_MS,
+                        0f,
+                        listener,
+                        Looper.getMainLooper()
+                    )
+                    subscribedProviders += p
+                } catch (t: Throwable) {
+                    FileLogger.w(TAG, "requestLocationUpdates($p) failed: " +
+                            "${t.javaClass.simpleName}: ${t.message}")
+                }
+            }
+            if (subscribedProviders.isEmpty()) {
+                saveError("applyRequest", IllegalStateException("не удалось подписаться ни на один провайдер"))
+                stopSelf(); return
+            }
+            FileLogger.i(TAG, "subscribed on $subscribedProviders interval=${INTERVAL_MS}ms")
+
+            // (4) Watchdog: если 6 минут молчания — тихий провайдер, перекатим подписку.
+            startedAtMs = nowMs
+            mainHandler.removeCallbacks(watchdog)
+            mainHandler.postDelayed(watchdog, WATCHDOG_PERIOD_MS)
         } catch (t: Throwable) {
-            saveError("requestLocationUpdates", t)
+            saveError("applyRequest", t)
             stopSelf()
         }
     }
 
+    /**
+     * Разовый свежий fix через LocationManager.getCurrentLocation (API 30+).
+     * Дёргаем на каждый подписанный провайдер параллельно — первый ответ и решает.
+     * SecurityException'ы (нет BG_LOCATION у не-foreground сервиса на Huawei) глотаем.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun requestSingleShot(locationManager: LocationManager, providers: List<String>) {
+        val executor = ContextCompat.getMainExecutor(this)
+        for (p in providers) {
+            try {
+                locationManager.getCurrentLocation(p, null, executor) { loc ->
+                    if (loc != null) {
+                        FileLogger.i(TAG, "getCurrentLocation($p) → fresh fix")
+                        scope.launch { handleLocation(loc) }
+                    } else {
+                        FileLogger.w(TAG, "getCurrentLocation($p) → null (timeout/no signal)")
+                    }
+                }
+            } catch (t: Throwable) {
+                FileLogger.w(TAG, "getCurrentLocation($p) failed: " +
+                        "${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+    }
+
     private fun handleLocation(loc: Location) {
+        lastHandledAtMs = System.currentTimeMillis()
         val token = settings.token
         if (token.length != 32) {
             FileLogger.w(TAG, "токен пуст/битый — stop")
@@ -263,6 +377,8 @@ class LocationService : Service() {
 
     private fun stopAll() {
         try { lm?.removeUpdates(listener) } catch (_: Throwable) {}
+        try { mainHandler.removeCallbacks(watchdog) } catch (_: Throwable) {}
+        subscribedProviders.clear()
     }
     private fun stopAllAndStop() {
         stopAll()
@@ -369,6 +485,16 @@ class LocationService : Service() {
 
         /** Проверять обновление каждый N-й POST-локации. § ANDROID-TODO 2. */
         private const val UPDATE_CHECK_EVERY_N = 5
+
+        // Watchdog: раз в 5 мин проверяем, что handleLocation вызывался; если тишина
+        // > 6 мин (5 период + 1 мин слэк на интервал подписки) — считаем провайдер
+        // тихо мёртвым и перекатываем подписку через applyRequest().
+        private const val WATCHDOG_PERIOD_MS = 5L * 60L * 1000L
+        private const val WATCHDOG_STALE_MS  = 6L * 60L * 1000L
+
+        // Кешированный last-known свежее этого срока годится как мгновенный seed
+        // при старте сервиса. Старше — не даём, чтобы не показывать «где был вчера».
+        private const val LAST_KNOWN_MAX_AGE_MS = 5L * 60L * 1000L
 
         fun start(context: Context) {
             val i = Intent(context, LocationService::class.java)
