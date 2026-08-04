@@ -87,14 +87,9 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         keepBgSwitch.isChecked = settings.keepInBackground
         keepBgSwitch.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) startBackgroundWalk()
-            else {
-                settings.keepInBackground = false
-                // Не сбрасываем alarm-chain немедленно — LocationService.stop/ACTION_STOP
-                // здесь не дёргается (юзер может просто хотеть быть только в foreground).
-                // Но schedule() внутри Receiver сам увидит keepInBackground=false и не
-                // будет переставлять следующий tick — цепочка выродится через ≤10 мин.
-                LocationTickReceiver.cancel(requireContext())
-            }
+            else settings.keepInBackground = false
+            // Alarm chain НЕ трогаем — он завязан на sharingEnabled, не на этот Switch.
+            // Этот Switch теперь управляет только auto-restart после ребута через BootReceiver.
         }
 
         battOptStatus = view.findViewById(R.id.settings_batt_opt_status)
@@ -215,13 +210,9 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         keepBgSwitch.setOnCheckedChangeListener(null)
         keepBgSwitch.isChecked = false
         settings.keepInBackground = false
-        LocationTickReceiver.cancel(requireContext())
         keepBgSwitch.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) startBackgroundWalk()
-            else {
-                settings.keepInBackground = false
-                LocationTickReceiver.cancel(requireContext())
-            }
+            else settings.keepInBackground = false
         }
     }
 }

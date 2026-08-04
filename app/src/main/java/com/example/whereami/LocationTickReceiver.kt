@@ -59,8 +59,8 @@ class LocationTickReceiver : BroadcastReceiver() {
             FileLogger.i(TAG, "skip: не сконфигурирован")
             return
         }
-        if (!settings.keepInBackground) {
-            FileLogger.i(TAG, "skip: keepInBackground=false")
+        if (!settings.sharingEnabled) {
+            FileLogger.i(TAG, "skip: sharingEnabled=false (юзер сделал logout или token невалиден)")
             return
         }
 
@@ -180,13 +180,19 @@ class LocationTickReceiver : BroadcastReceiver() {
 
         /**
          * Планирует следующий tick через AlarmManager. Идемпотентно — можно звать хоть каждый апдейт.
-         * Guard: если keepInBackground=false — не армируем, чтобы «foreground-only» юзер не получал
-         * фоновые POST'ы каждые 10 мин.
+         *
+         * Guard: армируем при sharingEnabled=true. Это условие «юзер сейчас делится» —
+         * ставится в MainActivity.startSharingIfReady при открытии приложения и снимается
+         * только на 401 или explicit logout. Отдельный флаг keepInBackground (пройден визард
+         * системных настроек) НЕ требуется для alarm chain — он нужен только для BootReceiver
+         * (перезапуск после ребута — более сильный opt-in). Причина изменения: у пользователей
+         * без включённого Switch'а Power Genie на Huawei убивал FGS без воскрешения — теперь
+         * alarm chain работает автоматически при любом активном шаринге.
          */
         fun schedule(context: Context) {
             val settings = SettingsRepository(context)
-            if (!settings.keepInBackground) {
-                FileLogger.i("LocationTickReceiver", "schedule skipped: keepInBackground=false")
+            if (!settings.sharingEnabled) {
+                FileLogger.i("LocationTickReceiver", "schedule skipped: sharingEnabled=false")
                 return
             }
             val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager

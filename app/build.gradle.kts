@@ -47,8 +47,8 @@ android {
         applicationId = "com.example.whereami"
         minSdk = 29
         targetSdk = 36
-        versionCode = 27
-        versionName = "5.4"
+        versionCode = 28
+        versionName = "5.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
