@@ -24,6 +24,10 @@
     <!-- Чтобы попросить OS не убивать сервис в background battery saver -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Wake-lock: AlarmManager RTC_WAKEUP / ELAPSED_REALTIME_WAKEUP + goAsync-работа
+         в LocationTickReceiver'е должны успеть до засыпания CPU -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Установка APK из внешнего источника (автообновление) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -76,6 +80,13 @@
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- AlarmManager wake-up chain — переживает смерть FGS на Huawei/HarmonyOS.
+             Явный компонент (explicit intent), поэтому intent-filter не нужен. -->
+        <receiver
+            android:name=".LocationTickReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <!-- FileProvider для передачи URI скачанного APK системному установщику -->
         <provider

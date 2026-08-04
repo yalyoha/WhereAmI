@@ -22,6 +22,14 @@ class WhereamiApp : Application() {
             // установленных клиентов; можно удалить через 1–2 релиза.
             WorkManager.getInstance(this).cancelUniqueWork("whereami_update_periodic")
             UpdateWorker.checkNow(this)     // one-shot при старте приложения
+            // Alarm-chain: если юзер уже включил keepInBackground, гарантируем что
+            // цепочка армирована. Это важно на Huawei: если процесс воскрес не через
+            // LocationService.start (а, скажем, через UpdateWorker или FileProvider),
+            // alarm мог не быть переставлен последним тиком и цепочка порвётся.
+            val settings = SettingsRepository(this)
+            if (settings.keepInBackground && settings.isConfigured()) {
+                LocationTickReceiver.schedule(this)
+            }
         } catch (t: Throwable) {
             // Ничего не должно валить процесс на этом этапе. Пишем в lastError,
             // диалог покажется при следующем открытии MainActivity.

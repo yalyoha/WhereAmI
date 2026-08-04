@@ -6,8 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
@@ -101,6 +103,26 @@ class LocationService : Service() {
     // LocationListener — SAM (functional interface), достаточно onLocationChanged.
     private val listener = LocationListener { loc -> scope.launch { handleLocation(loc) } }
 
+    /**
+     * Ловит SCREEN_ON и USER_PRESENT — когда кто-то (жена или нашедший телефон)
+     * касается экрана, мгновенно перезапрашиваем свежий fix. Батарея ~0, реакция
+     * секундная. Критично для сценария «телефон забыт, нашедший включает экран».
+     * Динамическая регистрация обязательна: с Android 8+ SCREEN_ON статически
+     * из манифеста не приходит.
+     */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent?) {
+            FileLogger.i(TAG, "screen event ${intent?.action ?: "(null)"} → refresh fix")
+            // applyRequest пересобирает seed + bootstrap + подписку, а также
+            // ресетит watchdog. Достаточно тяжело для screen-on, но простое и надёжное.
+            try { applyRequest() } catch (t: Throwable) {
+                FileLogger.w(TAG, "screen-triggered applyRequest failed: " +
+                        "${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+    }
+    private var screenReceiverRegistered: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         lm = getSystemService(LOCATION_SERVICE) as? LocationManager
@@ -108,7 +130,37 @@ class LocationService : Service() {
         queue    = UploadQueue(this)
         api      = ApiClient(settings.serverUrl)
         ensureChannel()
+        registerScreenReceiver()
         FileLogger.i(TAG, "onCreate pid=${android.os.Process.myPid()}")
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiverRegistered) return
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            // RECEIVER_NOT_EXPORTED (API 33+): системные бродкасты — не «экспортируемые»
+            // с точки зрения нашего процесса, флаг явно указан для compliance.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenReceiver, filter, RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(screenReceiver, filter)
+            }
+            screenReceiverRegistered = true
+            FileLogger.i(TAG, "screen receiver registered")
+        } catch (t: Throwable) {
+            FileLogger.w(TAG, "screen receiver register failed: " +
+                    "${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    private fun unregisterScreenReceiver() {
+        if (!screenReceiverRegistered) return
+        try { unregisterReceiver(screenReceiver) } catch (_: Throwable) {}
+        screenReceiverRegistered = false
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -378,6 +430,7 @@ class LocationService : Service() {
     private fun stopAll() {
         try { lm?.removeUpdates(listener) } catch (_: Throwable) {}
         try { mainHandler.removeCallbacks(watchdog) } catch (_: Throwable) {}
+        unregisterScreenReceiver()
         subscribedProviders.clear()
     }
     private fun stopAllAndStop() {
@@ -506,12 +559,18 @@ class LocationService : Service() {
                 FileLogger.w("LocationService", msg)
                 try { SettingsRepository(context).lastError = msg } catch (_: Throwable) {}
             }
+            // Всегда переставляем alarm chain при каждом start — идемпотентно.
+            // Даже если startForegroundService упал (напр. на Huawei ForegroundServiceStart-
+            // NotAllowedException), alarm chain останется и через 10 мин снова оживит.
+            LocationTickReceiver.schedule(context)
         }
 
         fun stop(context: Context) {
             val i = Intent(context, LocationService::class.java).setAction(ACTION_STOP)
-            FileLogger.i("LocationService", "stop() → dispatched ACTION_STOP")
+            FileLogger.i("LocationService", "stop() → dispatched ACTION_STOP + cancel tick")
             try { context.startService(i) } catch (_: Throwable) {}
+            // Отменяем alarm chain — иначе после logout мы будем продолжать POST'ить.
+            LocationTickReceiver.cancel(context)
         }
     }
 }
